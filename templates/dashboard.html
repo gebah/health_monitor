@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+
+{% block body_attrs %}
+
+data-days="{{ days }}"
+data-user-name="{{ USER_NAME }}"
+data-user-height="{{ USER_HEIGHT }}"
+data-target-weight="90"
+data-target-lean="70"
+data-target-bf="17.5"
+data-weekly-kcal-target="17500"
+
+{% endblock %}
+
+
+{% block content %}
+
+<h1>Health Monitor</h1>
+<p class="muted">Laatste update: {{ latest.day if latest else "—" }}</p>
+
+<form method="get" class="filters">
+  <label>Dagen:</label>
+  <select name="days" onchange="this.form.submit()">
+    <option value="30" {{ "selected" if days==30 else "" }}>30</option>
+    <option value="60" {{ "selected" if days==60 else "" }}>60</option>
+    <option value="180" {{ "selected" if days==180 else "" }}>180</option>
+  </select>
+
+  <label class="ml12">Activiteiten:</label>
+  <select name="acts" onchange="this.form.submit()">
+    <option value="10" {{ "selected" if act_limit==10 else "" }}>10</option>
+    <option value="25" {{ "selected" if act_limit==25 else "" }}>25</option>
+    <option value="50" {{ "selected" if act_limit==50 else "" }}>50</option>
+  </select>
+
+  <label class="ml12">Type:</label>
+  <select name="type" onchange="this.form.submit()">
+    <option value="all" {{ "selected" if activity_type=="all" else "" }}>All</option>
+    {% for t in types %}
+      <option value="{{ t }}" {{ "selected" if activity_type==t else "" }}>{{ t }}</option>
+    {% endfor %}
+  </select>
+</form>
+
+{% if status_emoji or status_text %}
+  <div class="card pro-status">
+    <b>Pro status</b>
+    <div class="pro-status-line">{{ status_emoji }} {{ status_text }}</div>
+    <div class="muted pro-status-advice">{{ advice }}</div>
+  </div>
+{% endif %}
+
+<h2>{{ USER_NAME }} – Body (Hume)</h2>
+<table class="summary-table">
+  <tr><th>Metric</th><th>Value</th><th>vs target</th></tr>
+
+  <tr>
+    <td>Gewicht</td>
+    <td>{{ latest_hume.weight_kg | round(1) if latest_hume and latest_hume.weight_kg is not none else "—" }} kg</td>
+    <td>
+      {% if delta_weight is not none %}
+        <span class="{{ 'good' if delta_weight <= 0 else 'bad' }}">{{ delta_weight | round(1) }}</span>
+        {% if delta_weight > 0 %} boven{% else %} onder{% endif %}
+      {% else %}—{% endif %}
+    </td>
+  </tr>
+
+  <tr>
+    <td>Lean mass</td>
+    <td>{{ latest_hume.lean_mass_kg | round(1) if latest_hume and latest_hume.lean_mass_kg is not none else "—" }} kg</td>
+    <td>
+      {% if delta_lean is not none %}
+        <span class="{{ 'good' if delta_lean >= 0 else 'bad' }}">{{ delta_lean | round(1) }}</span>
+        {% if delta_lean > 0 %} boven{% else %} onder{% endif %}
+      {% else %}—{% endif %}
+    </td>
+  </tr>
+
+  <tr>
+    <td>Body fat</td>
+    <td>{{ latest_hume.body_fat_pct | round(1) if latest_hume and latest_hume.body_fat_pct is not none else "—" }} %</td>
+    <td>
+      {% if delta_bf is not none %}
+        <span class="{{ 'good' if delta_bf <= 0 else 'bad' }}">{{ delta_bf | round(1) }}</span>
+        {% if delta_bf > 0 %} boven{% else %} onder{% endif %}
+      {% else %}—{% endif %}
+    </td>
+  </tr>
+
+  <tr>
+    <td>Lean Body Mass Index (LBMI)</td>
+    <td>{{ lbmi | round(2) if lbmi is not none else "—" }}</td>
+    <td>
+      {% if delta_lbmi is not none %}
+        <span class="{{ 'good' if delta_lbmi >= 0 else 'bad' }}">{{ delta_lbmi | round(2) }}</span>
+        {% if delta_lbmi > 0 %} boven{% else %} onder{% endif %}
+      {% else %}—{% endif %}
+    </td>
+  </tr>
+</table>
+
+<h2>Training readiness</h2>
+{% if readiness %}
+  {% set rs = readiness.score %}
+  {% set tone = "good" if rs >= 75 else ("ok" if rs >= 50 else "bad") %}
+  <div class="readiness card">
+    <div class="readiness__top">
+      <div class="dial dial--{{ tone }}" style="--p: {{ rs }};">
+        <div class="dial__inner">
+          <div class="dial__value">{{ rs }}</div>
+          <div class="dial__label">{{ readiness.label }}</div>
+        </div>
+      </div>
+
+      <div class="readiness__summary">
+        <div class="readiness__title">Today</div>
+        <div class="readiness__advice">
+          {% if rs >= 75 %}
+            Goede dag: je kunt intensiteit pakken als je zin hebt.
+          {% elif rs >= 50 %}
+            OK dag: normaal trainen, maar liever geen “max”.
+          {% else %}
+            Lage readiness: herstel/zone 2 of rust is slimmer.
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="readiness__bars">
+      {% set c = readiness.components %}
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">HRV</div><div class="bar__val">{{ c.hrv }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.hrv }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">Sleep</div><div class="bar__val">{{ c.sleep }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.sleep }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">Stress</div><div class="bar__val">{{ c.stress }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.stress }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">Body Battery</div><div class="bar__val">{{ c.bb }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.bb }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row">
+          <div class="bar__name">Training load (7d TCL)</div>
+          <div class="bar__val">
+            {{ readiness.tcl_7d }} / {{ readiness.tcl_target_7d }}
+          </div>
+        </div>
+        {% set c = readiness.components %}
+        <div class="bar__track">
+          <div class="bar__fill" style="--p: {{ c.load if c.load is not none else 0 }};"></div>
+        </div>
+      </div>
+
+  </div>
+{% else %}
+  <div class="card">Nog geen readiness beschikbaar.</div>
+{% endif %}
+
+<h2>Latest daily metrics</h2>
+{% if latest %}
+  {% set sleep_seconds = latest.get("sleep_seconds") %}
+  {% set sleep_hours = (sleep_seconds / 3600) if sleep_seconds else None %}
+
+  <div class="grid3">
+    <div class="card metric-card">
+      <div class="metric-title">Sleep score</div>
+      <div class="metric-value">{{ latest.get("sleep_score") if latest.get("sleep_score") is not none else "—" }}</div>
+    </div>
+
+    <div class="card metric-card">
+      <div class="metric-title">Sleep (hours)</div>
+      <div class="metric-value">{% if sleep_hours is not none %}{{ sleep_hours | round(2) }}{% else %}—{% endif %}</div>
+    </div>
+
+    <div class="card metric-card">
+      <div class="metric-title">Resting HR</div>
+      <div class="metric-value">{{ latest.get("resting_hr") if latest.get("resting_hr") is not none else "—" }}</div>
+    </div>
+
+    <div class="card metric-card">
+      <div class="metric-title">Avg stress</div>
+      <div class="metric-value">{{ latest.get("avg_stress") if latest.get("avg_stress") is not none else "—" }}</div>
+    </div>
+
+    <div class="card metric-card">
+      <div class="metric-title">HRV (RMSSD)</div>
+      <div class="metric-value">{{ latest.get("hrv_rmssd") if latest.get("hrv_rmssd") is not none else "—" }}</div>
+    </div>
+
+    <div class="card metric-card">
+      <div class="metric-title">Body Battery</div>
+      <div class="metric-value metric-small">
+        <div>High: {{ latest.get("body_battery_high") if latest.get("body_battery_high") is not none else "—" }}</div>
+        <div>Low: {{ latest.get("body_battery_low") if latest.get("body_battery_low") is not none else "—" }}</div>
+      </div>
+    </div>
+  </div>
+{% else %}
+  <p>Geen daily metrics gevonden.</p>
+{% endif %}
+
+<h2>Trends (laatste {{ days }} dagen)</h2>
+<div class="charts-grid">
+  <div class="card chart-card chart-span-2"><b>Sleep</b><div id="sleep_chart" class="chart"></div></div>
+  <div class="card chart-card"><b>HRV (RMSSD)</b><div id="hrv_chart" class="chart"></div></div>
+  <div class="card chart-card"><b>Stress</b><div id="stress_chart" class="chart"></div></div>
+  <div class="card chart-card"><b>Resting HR</b><div id="rhr_chart" class="chart"></div></div>
+  <div class="card chart-card chart-span-2"><b>Body Battery (Low–High)</b><div id="bb_chart" class="chart"></div></div>
+</div>
+
+<h2>Activities trends</h2>
+<div class="grid2">
+  <div class="card chart-card"><b>VO2max</b><div id="vo2_chart" class="chart"></div></div>
+  <div class="card chart-card"><b>Training effect</b><div id="te_chart" class="chart"></div></div>
+</div>
+
+<h2>Fitatu</h2>
+<div class="card chart-card">
+  <b>Fitatu – Weekly kcal (stacked macros)</b>
+  <div id="fitatu_weekly_chart" class="chart-lg"></div>
+</div>
+
+<h2>Pro analysis (weekly)</h2>
+<div class="card chart-card">
+  <b>Pro analysis</b>
+  <div id="pro_summary" class="muted mt6"></div>
+  <div id="pro_analysis_chart" class="chart-lg mt10"></div>
+</div>
+
+<h2>Body composition (Hume)</h2>
+<div class="grid2">
+  <div class="card chart-card"><b>Hume – Mass (kg)</b><div id="hume_mass_chart" class="chart-lg"></div></div>
+  <div class="card chart-card"><b>Hume – Composition</b><div id="hume_comp_chart" class="chart-lg"></div></div>
+  <div class="card chart-card span2"><b>Lean Body Mass Index (LBMI)</b><div id="lbmi_chart" class="chart"></div></div>
+</div>
+
+<h2>Latest activities</h2>
+
+{% if latest_activities and latest_activities|length %}
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Type</th>
+          <th>Naam</th>
+          <th>Afstand</th>
+          <th>Duur</th>
+          <th>HR</th>
+          <th>Power</th>
+          <th>TE</th>
+          <th>VO2</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in latest_activities %}
+          <tr class="activity-row">
+            <td>{{ a.start_time_local }}</td>
+            <td>{{ a.activity_type or "—" }}</td>
+            <td class="activity-main">{{ a.activity_name or "—" }}</td>
+            <td>
+              {% if a.distance_m is not none %}
+                {{ (a.distance_m / 1000) | round(1) }} km
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if a.duration_s is not none %}
+                {{ (a.duration_s / 60) | round(0) }} min
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if a.avg_hr is not none %}
+                {{ a.avg_hr | round(0) }}
+              {% else %}—{% endif %}
+              /
+              {% if a.max_hr is not none %}
+                {{ a.max_hr | round(0) }}
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if a.avg_power is not none %}
+                {{ a.avg_power | round(0) }} w
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if a.training_effect is not none %}
+                {{ a.training_effect | round(1) }}
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if a.vo2max_value is not none %}
+                {{ a.vo2max_value | round(1) }}
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="card">Geen activiteiten gevonden.</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
+{% endblock %}

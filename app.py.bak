@@ -1,0 +1,149 @@
+# app.py
+from flask import Flask, render_template, request, jsonify, redirect, flash
+from collector import sync_garmin, sync_strava, sync_all
+
+import config
+from readiness import readiness_score
+from models import (
+    build_dashboard_context,
+    get_daily_metrics_history,
+    get_hume_history,
+    get_fitatu_weekly,
+    get_activities,
+    get_activity_types,
+    get_activity_trends,
+    get_pro_analysis,
+    get_pro_weekly_analysis
+)
+
+app = Flask(__name__)
+app.secret_key = "secret"
+
+
+def cfg():
+    # kleine helper zodat models geen config module hoeft te importeren
+    return {
+        "USER_NAME": config.USER_NAME,
+        "USER_HEIGHT": config.USER_HEIGHT,
+        "TARGET_WEIGHT": config.TARGET_WEIGHT,
+        "TARGET_LEAN": config.TARGET_LEAN,
+        "TARGET_BF": config.TARGET_BF,
+        "WEEKLY_KCAL_TARGET": config.WEEKLY_KCAL_TARGET,
+    }
+
+
+@app.route("/")
+def dashboard():
+    days = int(request.args.get("days", 30))
+    act_limit = int(request.args.get("acts", 25))
+    activity_type = request.args.get("type", "all")
+
+    ctx = build_dashboard_context(
+        days=days,
+        act_limit=act_limit,
+        activity_type=activity_type,
+        config=cfg(),
+    )
+
+    readiness = readiness_score(ctx["latest"])
+
+    return render_template(
+        "dashboard.html",
+
+        # config → template
+        USER_NAME=config.USER_NAME,
+        USER_HEIGHT=config.USER_HEIGHT,
+
+        # dashboard context
+        **ctx,
+
+        # readiness
+        readiness=readiness,
+        readiness_score=readiness["score"],
+
+        # pro placeholders (zodat template safe is)
+        status_emoji=None,
+        status_text=None,
+        advice=None,
+    )
+
+
+@app.route("/api/daily_metrics")
+def api_daily():
+    days = int(request.args.get("days", 30))
+    return jsonify(get_daily_metrics_history(days=days))
+
+
+@app.route("/collectors")
+def collectors():
+    return render_template("collectors.html")
+
+
+@app.route("/collectors/run", methods=["POST"])
+def collectors_run():
+    action = request.form["action"]
+
+    if action == "collector_all":
+        sync_all()
+    elif action == "collector_garmin":
+        sync_garmin()
+    elif action == "collector_strava":
+        sync_strava()
+
+    flash("Collector gestart", "success")
+    return redirect("/collectors")
+
+@app.route("/api/hume")
+def api_hume():
+    days = int(request.args.get("days", 180))
+    return jsonify(get_hume_history(days=days))
+
+
+@app.route("/api/fitatu_weekly")
+def api_fitatu_weekly():
+    days = int(request.args.get("days", 365))
+    return jsonify(get_fitatu_weekly(days=days))
+
+
+@app.route("/api/activities")
+def api_activities():
+    limit = int(request.args.get("acts", request.args.get("limit", 25)))
+    activity_type = request.args.get("type", "all")
+    return jsonify(get_activities(limit=limit, activity_type=activity_type))
+
+
+@app.route("/api/activity_types")
+def api_activity_types():
+    return jsonify(get_activity_types())
+
+
+@app.route("/api/activity_trends")
+def api_activity_trends():
+    days = int(request.args.get("days", 180))
+    activity_type = request.args.get("type", "all")
+    return jsonify(get_activity_trends(days=days, activity_type=activity_type))
+
+
+@app.route("/api/pro_analysis")
+def api_pro_analysis():
+    days = int(request.args.get("days", 365))
+    return jsonify(get_pro_analysis(days=days))
+
+
+@app.route("/api/pro_weekly_analysis")
+def api_pro_weekly_analysis():
+    days = int(request.args.get("days", 365))
+    return jsonify(get_pro_weekly_analysis(days=days))
+
+@app.route("/api/hume_body")
+def api_hume_body():
+    days = int(request.args.get("days", 365))
+    # hergebruik dezelfde data als /api/hume
+    return jsonify(get_hume_history(days=days))
+
+@app.route("/api/_debug/db")
+def api_debug_db():
+    return jsonify(debug_db_overview())
+
+if __name__ == "__main__":
+    app.run(debug=True)

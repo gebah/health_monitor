@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Collectors{% endblock %}
+
+{% block content %}
+<h1>Collectors</h1>
+
+<form method="post" action="/collectors/run" class="actions">
+  <button name="action" value="collector_all">Run all</button>
+  <button name="action" value="collector_garmin">Run Garmin</button>
+  <button name="action" value="collector_strava">Run Strava</button>
+</form>
+
+<p class="hint">
+Tip: als je collectors soms lang duren, laat ik je zo meteen zien hoe je dit async kunt doen
+(zodat je pagina direct terugkomt) + een “laatste run” log.
+</p>
+{% endblock %}

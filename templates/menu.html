@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Menu{% endblock %}
+{% block content %}
+
+<h1>Menu</h1>
+
+<div class="card-grid">
+  <a class="card cardlink" href="/collectors">
+    <h2>Collectors handmatig draaien</h2>
+    <p>Start Garmin/Hume/Strava collectors en bekijk status.</p>
+  </a>
+
+  <a class="card cardlink" href="/fitatu">
+    <h2>Fitatu import</h2>
+    <p>Kies een exportbestand (.csv) en importeer calorieën & macro’s.</p>
+  </a>
+
+  <a class="card cardlink" href="/hume">
+    <h2>Hume gegevens</h2>
+    <p>Voer de Hume gegevens handmatig in.</p>
+  </a>
+
+  <a class="card cardlink" href="/">
+    <h2>Dashboard</h2>
+    <p>Trends, targets, deltas en grafieken.</p>
+  </a>
+</div>
+
+{% endblock %}

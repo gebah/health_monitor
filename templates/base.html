@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="nl" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Health Monitor{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+
+<body {% block body_attrs %}{% endblock %}>
+<header class="topbar">
+  <div class="topbar__inner">
+
+    <a class="brand" href="/">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M3 13h4l2-6 4 12 2-6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="brand__text">Health Monitor</span>
+    </a>
+
+    <nav class="nav">
+      <a class="nav__link {% if request.path == '/' %}is-active{% endif %}" href="/">
+        <span class="nav__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1v-10.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        </span>
+        Dashboard
+      </a>
+
+      <a class="nav__link {% if request.path.startswith('/collectors') %}is-active{% endif %}" href="/collectors">
+        <span class="nav__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </span>
+        Collectors
+      </a>
+
+      <a class="nav__link {% if request.path.startswith('/fitatu') %}is-active{% endif %}" href="/fitatu">
+        <span class="nav__icon" aria-hidden="true">
+          <img src="{{ url_for('static', filename='img/fitatu.jpeg') }}" alt="">
+        </span>
+        Fitatu
+      </a>
+
+      <a class="nav__link {% if request.path.startswith('/hume') %}is-active{% endif %}" href="/hume">
+        <span class="nav__icon" aria-hidden="true">
+          <img src="{{ url_for('static', filename='img/hume.png') }}" alt="">
+        </span>
+        Hume
+      </a>
+    </nav>
+
+    <div class="topbar__right">
+      {% set rs = readiness_score if readiness_score is defined else none %}
+      <div class="pill {% if rs is none %}pill--muted{% elif rs >= 75 %}pill--good{% elif rs >= 50 %}pill--ok{% else %}pill--bad{% endif %}">
+        <span class="pill__label">Readiness</span>
+        <span class="pill__value">{% if rs is none %}—{% else %}{{ rs }}{% endif %}</span>
+      </div>
+
+      <button class="iconbtn" id="themeToggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z" stroke="currentColor" stroke-width="2"/>
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <div class="user">
+        <button class="user__btn" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
+          <span class="avatar">{{ (USER_NAME if USER_NAME is defined else "U")[:1] }}</span>
+          <span class="user__name">{{ USER_NAME if USER_NAME is defined else "User" }}</span>
+          <span class="caret" aria-hidden="true">▾</span>
+        </button>
+
+        <div class="dropdown" id="userMenu" role="menu" aria-label="User menu">
+          <a class="dropdown__item" href="/collectors" role="menuitem">Run collectors</a>
+          <a class="dropdown__item" href="/fitatu" role="menuitem">Fitatu invoer</a>
+          <div class="dropdown__sep"></div>
+          <a class="dropdown__item dropdown__item--muted" href="#" role="menuitem">Logout (later)</a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</header>
+
+<main class="page">
+  <div class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="toasts">
+          {% for cat, msg in messages %}
+            <div class="toast toast--{{ cat }}">{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </div>
+</main>
+
+<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

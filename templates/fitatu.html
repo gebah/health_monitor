@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Fitatu import{% endblock %}
+{% block content %}
+
+<h1 style="display:flex;align-items:center;gap:10px;">
+  <img src="{{ url_for('static', filename='img/fitatu.jpeg') }}" width="24">
+  Fitatu import
+</h1>
+
+<div class="card">
+  <form method="post" action="/fitatu/import" enctype="multipart/form-data" class="form">
+    <label>Fitatu export (.csv)
+      <input type="file" name="file" accept=".csv" required>
+    </label>
+
+    <button class="btn" type="submit">Importeer</button>
+    <a class="btn btn--ghost" href="/menu">Terug</a>
+  </form>
+
+  {% if stats %}
+    <hr>
+    <b>Resultaat</b><br>
+    Bestand: {{ stats.file }}<br>
+    Dagen geïmporteerd: {{ stats.days }}<br>
+    Periode: {{ stats.min_day }} → {{ stats.max_day }}<br>
+    Synced at: {{ stats.synced_at }}<br>
+  {% endif %}
+</div>
+
+{% endblock %}

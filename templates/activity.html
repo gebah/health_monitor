@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Activity {{ a.activity_id }}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+    pre { background: #fafafa; border: 1px solid #eee; padding: 12px; border-radius: 10px; overflow:auto; }
+    a { text-decoration: none; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← terug naar dashboard</a></p>
+
+  <div class="card">
+    <h2 style="margin:0;">{{ a.activity_name }} <span class="type-badge"> {{ (a.activity_type or "OTHER")|upper }}</span></h2>
+    <p style="margin:6px 0 0 0;">
+      {{ a.start_time_local }} • {{ a.activity_type }}
+    </p>
+    <ul>
+      <li>Distance: {{ (a.distance_m/1000) | round(2) if a.distance_m is not none else "—" }} km</li>
+      <li>Duration: {{ (a.duration_s/60) | round(1) if a.duration_s is not none else "—" }} min</li>
+      <li>Avg HR: {{ a.avg_hr if a.avg_hr is not none else "—" }} bpm</li>
+      <li>Max HR: {{ a.max_hr if a.max_hr is not none else "—" }} bpm</li>
+      <li>Avg Power: {{ a.avg_power if a.avg_power is not none else "—" }} W</li>
+      <li>Training effect: {{ a.training_effect if a.training_effect is not none else "—" }}</li>
+      <li>VO2max: {{ a.vo2max_value if a.vo2max_value is not none else "—" }}</li>
+    </ul>
+  </div>
+</body>
+</html>
