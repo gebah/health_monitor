@@ -491,3 +491,7 @@ html[data-theme="dark"] .dial{
 .metric-card--good .metric-value { color: var(--good); }
 .metric-card--ok   .metric-value { color: var(--ok); }
 .metric-card--bad  .metric-value { color: var(--bad); }
+
+.readiness__advice.good { color: var(--good); }
+.readiness__advice.ok   { color: var(--ok); }
+.readiness__advice.bad  { color: var(--bad); }

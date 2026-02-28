@@ -107,6 +107,7 @@ data-weekly-kcal-target="17500"
 {% if readiness %}
   {% set rs = readiness.score %}
   {% set tone = "good" if rs >= 75 else ("ok" if rs >= 50 else "bad") %}
+
   <div class="readiness card">
     <div class="readiness__top">
       <div class="dial dial--{{ tone }}" style="--p: {{ rs }};">
@@ -118,21 +119,24 @@ data-weekly-kcal-target="17500"
 
       <div class="readiness__summary">
         <div class="readiness__title">Today</div>
-        <div class="readiness__advice">
-          {% if rs >= 75 %}
-            Goede dag: je kunt intensiteit pakken als je zin hebt.
-          {% elif rs >= 50 %}
-            OK dag: normaal trainen, maar liever geen “max”.
-          {% else %}
-            Lage readiness: herstel/zone 2 of rust is slimmer.
+
+        {# ✅ ULTRA readiness advice (icon + state + advice + why) #}
+        <div class="readiness__advice {{ readiness.tone }}">
+          <div style="font-weight:700; margin-bottom:2px;">
+            {{ readiness.icon }} {{ readiness.state }}
+          </div>
+
+          <div>
+            {{ readiness.advice }}
+          </div>
+
+          {% if readiness.why %}
+            <div class="muted" style="margin-top:6px; font-size:12px;">
+              {{ readiness.why }}
+            </div>
           {% endif %}
         </div>
-        
-        {% if readiness.why %}
-          <div class="muted" style="margin-top:6px; font-size:12px;">
-            {{ readiness.why }}
-          </div>
-        {% endif %}
+
       </div>
     </div>
 
@@ -162,17 +166,15 @@ data-weekly-kcal-target="17500"
       <div class="bar">
         <div class="bar__row">
           <div class="bar__name">Training load (7d TCL)</div>
-          <div class="bar__val">
-            {{ readiness.tcl_7d }} / {{ readiness.tcl_target_7d }}
-          </div>
+          <div class="bar__val">{{ readiness.tcl_7d }} / {{ readiness.tcl_target_7d }}</div>
         </div>
-        {% set c = readiness.components %}
         <div class="bar__track">
           <div class="bar__fill" style="--p: {{ c.load if c.load is not none else 0 }};"></div>
         </div>
       </div>
-
+    </div>
   </div>
+
 {% else %}
   <div class="card">Nog geen readiness beschikbaar.</div>
 {% endif %}
