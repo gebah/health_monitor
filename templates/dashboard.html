@@ -6,6 +6,7 @@
 {% block body_attrs %}
 
 data-days="{{ days }}"
+data-readiness-score="{{ readiness_score }}"
 data-user-name="{{ USER_NAME }}"
 data-user-height="{{ USER_HEIGHT }}"
 data-target-weight="90"
@@ -126,6 +127,12 @@ data-weekly-kcal-target="17500"
             Lage readiness: herstel/zone 2 of rust is slimmer.
           {% endif %}
         </div>
+        
+        {% if readiness.why %}
+          <div class="muted" style="margin-top:6px; font-size:12px;">
+            {{ readiness.why }}
+          </div>
+        {% endif %}
       </div>
     </div>
 
@@ -208,6 +215,19 @@ data-weekly-kcal-target="17500"
         <div>Low: {{ latest.get("body_battery_low") if latest.get("body_battery_low") is not none else "—" }}</div>
       </div>
     </div>
+
+  <div class="card metric-card" id="form_metric" style="display:none;">
+    <div class="metric-title">Form (TSB) <span class=muted>today</span></div>
+    <div class="metric-value" id="form_metric_value">—</div>
+    <div class="muted" id="form_metric_label">—</div>
+    <div class="muted" id="form_metric_load" style="font-size:12px;">
+      ATL — • CTL —
+    </div>
+      <div class="muted" id="form_metric_advice" style="font-size:12px; margin-top:4px;">
+        —
+    </div>
+  </div>
+
   </div>
 {% else %}
   <p>Geen daily metrics gevonden.</p>
@@ -227,6 +247,12 @@ data-weekly-kcal-target="17500"
   <div class="card chart-card"><b>VO2max</b><div id="vo2_chart" class="chart"></div></div>
   <div class="card chart-card"><b>Training effect</b><div id="te_chart" class="chart"></div></div>
 </div>
+
+<h2>Training load (ATL / CTL / Form)</h2>
+  <div class="card chart-card chart-span-2">
+    <b>TrainingPeaks-style load</b>
+    <div id="training_load_chart" class="chart-lg"></div>
+  </div>
 
 <h2>Fitatu</h2>
 <div class="card chart-card">

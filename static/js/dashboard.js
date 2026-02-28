@@ -26,6 +26,63 @@ function plotIfExists(id, plotFn) {
   plotFn();
 }
 
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function hexToRgba(hex, a = 0.12) {
+  // ondersteunt #rgb en #rrggbb
+  if (!hex) return `rgba(0,0,0,${a})`;
+  let h = hex.replace("#", "").trim();
+  if (h.length === 3) h = h.split("").map(ch => ch + ch).join("");
+  const n = parseInt(h, 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+function tsbMeta(tsb) {
+  if (tsb >= 10) return { tone: "good", label: "Race-ready" };
+  if (tsb >= 0)  return { tone: "good", label: "Fresh" };
+  if (tsb >= -10) return { tone: "ok", label: "Normal" };
+  if (tsb >= -25) return { tone: "ok", label: "Heavy" };
+  return { tone: "bad", label: "Too much" };
+}
+
+function trainingAdvice({ tsb, readinessScore }) {
+  // readinessScore kan null zijn; maak robuust
+  const r = (readinessScore === null || readinessScore === undefined) ? null : Number(readinessScore);
+
+  // 1) Echt diep rood: altijd remmen
+  if (tsb <= -25) {
+    return "Advies: rust / herstel (wandelen, mobiliteit, evt. 30–45 min Z1).";
+  }
+
+  // 2) Zware fase
+  if (tsb <= -10) {
+    if (r !== null && r < 50) return "Advies: hersteltraining (Z1–Z2) of rust; geen intensiteit.";
+    return "Advies: rustige duur (Z2) of techniek; geen ‘max’ vandaag.";
+  }
+
+  // 3) Normaal
+  if (tsb < 0) {
+    if (r !== null && r < 50) return "Advies: easy day (Z1–Z2) — readiness is laag.";
+    if (r !== null && r >= 75) return "Advies: normale training kan, maar hou intensiteit gecontroleerd.";
+    return "Advies: normale training (duur/kracht), intervals liever kort.";
+  }
+
+  // 4) Fris
+  if (tsb < 10) {
+    if (r !== null && r >= 75) return "Advies: goede dag voor kwaliteit (intervals/tempo) als je zin hebt.";
+    return "Advies: prima dag voor tempo/threshold of stevige duur.";
+  }
+
+  // 5) Race-ready
+  if (r !== null && r < 50) return "Advies: je bent fris, maar readiness laag → kies techniek of korte prikkel.";
+  return "Advies: topdag voor hard (intervals), PR-poging of wedstrijd.";
+}
+
 // --------------------
 // Daily trends
 // --------------------
@@ -306,6 +363,211 @@ async function loadLBMI() {
 }
 
 // --------------------
+// Training load (ATL/CTL/TSB) a la TrainingPeaks + zones + today marker
+// --------------------
+async function loadTrainingLoad() {
+  const { days } = cfg();
+  const res = await fetch(`/api/training_load?days=${days}`);
+  const data = await res.json();
+
+  if (!Array.isArray(data) || data.length === 0) {
+    Plotly.newPlot("training_load_chart", [], { title: "No training load data" }, { responsive: true });
+    return;
+  }
+
+  const x = data.map(d => d.day);
+  const tcl = data.map(d => toNum(d.tcl));
+  const atl = data.map(d => toNum(d.atl));
+  const ctl = data.map(d => toNum(d.ctl));
+  const tsb = data.map(d => toNum(d.tsb));
+
+  // Today = laatste datapunt
+  const last = data[data.length - 1];
+  const xToday = last.day;
+  const atlToday = toNum(last.atl);
+  const ctlToday = toNum(last.ctl);
+  const tsbToday = toNum(last.tsb);
+
+  const GOOD = cssVar("--good");
+  const OK = cssVar("--ok");
+  const BAD = cssVar("--bad");
+
+  const todayColor =
+    tsbToday >= 0 ? GOOD :
+    tsbToday >= -10 ? OK :
+    BAD;
+  
+  // Zones (TrainingPeaks-achtig)
+  const zones = [
+    { y0: 10,  y1: 25,  label: "Race-ready", color: hexToRgba(GOOD, 0.14) },
+    { y0: 0,   y1: 10,  label: "Fresh",      color: hexToRgba(GOOD, 0.10) },
+    { y0: -10, y1: 0,   label: "Normal",     color: hexToRgba(OK,   0.10) },
+    { y0: -25, y1: -10, label: "Heavy",      color: hexToRgba(OK,   0.14) },
+    { y0: -60, y1: -25, label: "Too much",   color: hexToRgba(BAD,  0.14) },
+  ];
+
+  // shapes: achtergrondbanden op yaxis2 (TSB)
+  const shapes = zones.map(z => ({
+    type: "rect",
+    xref: "paper",
+    x0: 0,
+    x1: 1,
+    yref: "y2",
+    y0: z.y0,
+    y1: z.y1,
+    fillcolor: z.color,
+    opacity: 1,
+    line: { width: 0 },
+    layer: "below",
+  }));
+
+  // zone labels rechts
+  const zoneAnnotations = zones.map(z => ({
+    xref: "paper",
+    x: 1,
+    xanchor: "right",
+    yref: "y2",
+    y: (z.y0 + z.y1) / 2,
+    yanchor: "middle",
+    showarrow: false,
+    text: z.label,
+    font: { size: 11 },
+    opacity: 0.9,
+  }));
+
+  // Today marker line (vertical)
+  shapes.push({
+    type: "line",
+    xref: "x",
+    x0: xToday,
+    x1: xToday,
+    yref: "paper",
+    y0: 0,
+    y1: 1,
+    line: { width: 2, dash: "dot" },
+    opacity: 0.6,
+  });
+
+  // “Today” annotation + summary
+  const headerAnnotation = {
+    xref: "paper",
+    yref: "paper",
+    x: 0,
+    y: 1.18,
+    showarrow: false,
+    text: `ATL=vermoeidheid (7d) • CTL=fitheid (42d) • TSB=vorm (CTL−ATL)`,
+    font: { size: 12 },
+  };
+
+  const todayAnnotation = {
+    xref: "paper",
+    yref: "paper",
+    x: 1,
+    y: 1.18,
+    xanchor: "right",
+    showarrow: false,
+    text: `Today: ATL ${atlToday.toFixed(1)} • CTL ${ctlToday.toFixed(1)} • TSB ${tsbToday.toFixed(1)}`,
+    font: { size: 12 },
+  };
+
+  Plotly.newPlot("training_load_chart", [
+    {
+      x, y: tcl,
+      type: "bar",
+      name: "Daily load (TCL)",
+      opacity: 0.45,
+      yaxis: "y",
+      hovertemplate: "Dag: %{x}<br>Training load: %{y:.0f}<extra></extra>",
+    },
+    {
+      x, y: atl,
+      mode: "lines",
+      name: "ATL – vermoeidheid (7d)",
+      yaxis: "y",
+      hovertemplate: "Dag: %{x}<br>ATL: %{y:.1f}<extra></extra>",
+    },
+    {
+      x, y: ctl,
+      mode: "lines",
+      name: "CTL – fitheid (42d)",
+      yaxis: "y",
+      hovertemplate: "Dag: %{x}<br>CTL: %{y:.1f}<extra></extra>",
+    },
+    {
+      x, y: tsb,
+      mode: "lines",
+      name: "TSB – vorm (CTL − ATL)",
+      yaxis: "y2",
+      hovertemplate: "Dag: %{x}<br>TSB (vorm): %{y:.1f}<extra></extra>",
+    },
+    // today marker point on TSB
+    {
+      x: [xToday],
+      y: [tsbToday],
+      mode: "markers",
+      name: "Today (TSB)",
+      yaxis: "y2",
+      marker: {
+        size: 10,
+        color: todayColor
+      },
+      hovertemplate: `Today: %{x}<br>TSB: %{y:.1f}<extra></extra>`,
+      showlegend: true,
+    },
+  ], {
+    margin: { t: 55, r: 10, b: 40, l: 60 },
+    xaxis: { type: "date" },
+    yaxis: { title: "Training load" },
+    yaxis2: {
+      title: "Vorm (TSB)",
+      overlaying: "y",
+      side: "right",
+      zeroline: true,
+      zerolinewidth: 1,
+    },
+    legend: { orientation: "h" },
+    shapes,
+    annotations: [headerAnnotation, todayAnnotation, ...zoneAnnotations],
+  }, { responsive: true });
+}
+
+async function loadFormMetric() {
+  const { days } = cfg();
+  const res = await fetch(`/api/training_load?days=${days}`);
+  const data = await res.json();
+  if (!Array.isArray(data) || data.length === 0) return;
+
+  const last = data[data.length - 1];
+
+  const tsb = toNum(last.tsb);
+  const atl = toNum(last.atl);
+  const ctl = toNum(last.ctl);
+
+  const card = document.getElementById("form_metric");
+  const valEl = document.getElementById("form_metric_value");
+  const labEl = document.getElementById("form_metric_label");
+  const loadEl = document.getElementById("form_metric_load");
+  const advEl = document.getElementById("form_metric_advice");
+  if (!card || !valEl || !labEl || !loadEl || !advEl) return;
+
+  // readiness score uit body-attrs (komt uit server)
+  const readinessScore = Number(document.body.dataset.readinessScore || "NaN");
+  const r = Number.isFinite(readinessScore) ? readinessScore : null;
+
+  const meta = tsbMeta(tsb);
+
+  card.classList.remove("metric-card--good", "metric-card--ok", "metric-card--bad");
+  card.classList.add(`metric-card--${meta.tone}`);
+  card.style.display = "";
+
+  valEl.textContent = tsb.toFixed(1);
+  labEl.textContent = meta.label;
+  loadEl.textContent = `ATL ${atl.toFixed(0)} • CTL ${ctl.toFixed(0)}`;
+  advEl.textContent = trainingAdvice({ tsb, readinessScore: r });
+}
+
+
+// --------------------
 // Boot
 // --------------------
 document.addEventListener("DOMContentLoaded", () => {
@@ -315,4 +577,7 @@ document.addEventListener("DOMContentLoaded", () => {
   plotIfExists("pro_analysis_chart", loadProAnalysis);
   plotIfExists("hume_mass_chart", loadHumeBody);
   plotIfExists("lbmi_chart", loadLBMI);
+  plotIfExists("training_load_chart", loadTrainingLoad)
 });
+
+loadFormMetric();

@@ -1,7 +1,8 @@
 from flask import Flask, render_template, request, jsonify, redirect, flash
-import sqlite3
-
+from datetime import date, datetime, timedelta
 from collector import sync_garmin, sync_strava, sync_all
+
+import sqlite3
 
 app = Flask(__name__)
 app.secret_key = "secret"
@@ -26,13 +27,18 @@ def clamp(v, lo=0, hi=100):
     return max(lo, min(hi, v))
 
 
-def readiness_score(latest, *, tcl_7d=0.0, tcl_target_7d=300.0):
-    """
-    Readiness = HRV + Sleep + Stress + Body Battery + Training Load (TCL 7d)
-
-    tcl_target_7d: richtpunt per 7 dagen (pas aan naar jouw niveau)
-    """
+def readiness_score(
+    latest,
+    *,
+    tcl_7d=0.0,
+    tcl_target_7d=300.0,
+    tsb=None,
+    atl=None,
+    ctl=None,
+    flags=None
+):
     latest = latest or {}
+    flags = flags or {"hrv_drop": False, "sleep_low": False, "stress_high": False}
 
     hrv = latest.get("hrv_rmssd")
     sleep = latest.get("sleep_score")
@@ -44,25 +50,22 @@ def readiness_score(latest, *, tcl_7d=0.0, tcl_target_7d=300.0):
     stress_score = clamp(100 - stress * 2) if stress is not None else 50
     bb_score = bb if bb is not None else 50
 
-    # --- Training load score (TCL 7d) ---
-    # ratio rond 1.0 = top; te hoog = penalize, te laag = klein beetje minder
+    # ---- Training load score (ratio tcl_7d vs target) ----
     target = max(1.0, float(tcl_target_7d))
-    ratio = (float(tcl_7d) / target) if target else 0.0
+    ratio = float(tcl_7d) / target
 
     if ratio <= 0.60:
         load_score = 80.0
     elif ratio <= 1.00:
-        # 0.60 -> 80, 1.00 -> 100
         load_score = 80.0 + (ratio - 0.60) / 0.40 * 20.0
     elif ratio <= 1.40:
-        # 1.00 -> 100, 1.40 -> 60
         load_score = 100.0 - (ratio - 1.00) / 0.40 * 40.0
     else:
         load_score = 40.0
 
     load_score = clamp(load_score)
 
-    # --- Combine ---
+    # ---- Core readiness ----
     score = round(
         0.30 * hrv_score +
         0.30 * sleep_score +
@@ -72,10 +75,106 @@ def readiness_score(latest, *, tcl_7d=0.0, tcl_target_7d=300.0):
     )
 
     label = "Good" if score >= 75 else "OK" if score >= 50 else "Low"
+        # ------------------------
+    # VISUAL META (tone + icon)
+    # ------------------------
+
+    if tsb is not None:
+        tsb_val = float(tsb)
+
+        if tsb_val >= 10:
+            tone = "good"
+            icon = "🟢"
+            state = "Fresh"
+
+        elif tsb_val >= 0:
+            tone = "good"
+            icon = "🟢"
+            state = "Ready"
+
+        elif tsb_val >= -10:
+            tone = "ok"
+            icon = "🟠"
+            state = "Normal"
+
+        elif tsb_val >= -25:
+            tone = "ok"
+            icon = "🟠"
+            state = "Heavy fatigue"
+
+        else:
+            tone = "bad"
+            icon = "🔴"
+            state = "Recovery needed"
+
+    else:
+        tone = "ok"
+        icon = "⚪"
+        state = "Unknown"
+
+    # ------------------------
+    # ULTRA ADVICE LOGIC
+    # ------------------------
+    # Base recommendation from TSB (form)
+    # TSB bands (TrainingPeaks-ish): >=10 race-ready, 0-10 fresh, -10-0 normal, -25--10 heavy, <=-25 too much
+    tsb_val = None if tsb is None else float(tsb)
+
+    def downgrade(msg):
+        # degrade intensity one step
+        if "interval" in msg.lower() or "hard" in msg.lower() or "kwaliteit" in msg.lower():
+            return "Advies: tempo/threshold (kort) of stevige duur; geen max-intervals."
+        if "tempo" in msg.lower() or "threshold" in msg.lower():
+            return "Advies: normale duur/kracht, houd het gecontroleerd."
+        return "Advies: rustige duur (Z1–Z2) of herstel."
+
+    # start with TSB-based advice
+    if tsb_val is None:
+        advice = "Advies: normale training; gebruik readiness als leidraad."
+    elif tsb_val <= -25:
+        advice = "Advies: rust / herstel (wandelen, mobiliteit, evt. 30–45 min Z1)."
+    elif tsb_val <= -10:
+        advice = "Advies: rustige duur (Z2) of techniek; geen intensiteit."
+    elif tsb_val < 0:
+        advice = "Advies: normale training (duur/kracht); intensiteit liever kort en gecontroleerd."
+    elif tsb_val < 10:
+        advice = "Advies: goede dag voor kwaliteit (tempo/threshold of intervals) als je je goed voelt."
+    else:
+        advice = "Advies: topdag voor hard (intervals), PR-poging of wedstrijd."
+
+    # combine with readiness (override extremes)
+    if score < 40:
+        advice = "Advies: rustdag aanbevolen. Focus op herstel."
+    elif score < 50 and tsb_val is not None and tsb_val < 10:
+        advice = "Advies: easy day (Z1–Z2); readiness is laag."
+
+    # recovery flags can downgrade intensity
+    if flags.get("sleep_low") or flags.get("stress_high") or flags.get("hrv_drop"):
+        # only downgrade if we planned intensity
+        if tsb_val is not None and tsb_val >= 0 and score >= 60:
+            advice = downgrade(advice)
+        elif score < 60:
+            advice = "Advies: herstel/duur Z1–Z2; herstel-signalen zijn minder (HRV/sleep/stress)."
+
+    # a short “why” string (nice in UI/tooltips)
+    why_bits = []
+    if tsb_val is not None:
+        why_bits.append(f"TSB {tsb_val:.1f}")
+    if atl is not None and ctl is not None:
+        why_bits.append(f"ATL {float(atl):.0f} • CTL {float(ctl):.0f}")
+    if flags.get("hrv_drop"):
+        why_bits.append("HRV↓")
+    if flags.get("sleep_low"):
+        why_bits.append("Sleep↓")
+    if flags.get("stress_high"):
+        why_bits.append("Stress↑")
+    why = " • ".join(why_bits) if why_bits else None
 
     return {
         "score": score,
         "label": label,
+        "advice": advice,
+        "why": why,
+
         "components": {
             "hrv": round(hrv_score),
             "sleep": round(sleep_score),
@@ -83,15 +182,23 @@ def readiness_score(latest, *, tcl_7d=0.0, tcl_target_7d=300.0):
             "bb": round(bb_score),
             "load": round(load_score),
         },
+
         "tcl_7d": round(float(tcl_7d), 1),
         "tcl_target_7d": round(float(tcl_target_7d), 1),
 
-        # laat deze staan als je template ze nog ergens verwacht
+        "atl": None if atl is None else round(float(atl), 1),
+        "ctl": None if ctl is None else round(float(ctl), 1),
+        "tsb": None if tsb is None else round(float(tsb), 1),
+
+        # template compat
         "fuel": None,
         "kcal": None,
         "kcal_target": None,
-    }
 
+        "tone": tone,
+        "icon": icon,
+        "state": state,
+    }
 
 def get_tcl_7d(conn):
     """
@@ -123,6 +230,106 @@ def get_latest_activities(conn, limit=25, activity_type="all"):
 
     return [dict(r) for r in rows]
 
+
+def _parse_yyyy_mm_dd(s: str):
+    return datetime.strptime(s, "%Y-%m-%d").date()
+
+def _ema(loads, tau_days: int):
+    if not loads:
+        return []
+    k = 1.0 / float(tau_days)
+    out = []
+    prev = float(loads[0])
+    out.append(prev)
+    for x in loads[1:]:
+        x = float(x)
+        prev = prev + (x - prev) * k
+        out.append(prev)
+    return out
+
+def get_training_load_today(conn, days_back: int = 120):
+    """
+    Geeft laatste ATL/CTL/TSB + daily TCL + laatste 2 dagen load.
+    Gebaseerd op strava_activities.tcl en start_time_local.
+    """
+    rows = conn.execute("""
+        SELECT date(start_time_local) AS day, COALESCE(SUM(tcl),0) AS tcl
+        FROM strava_activities
+        WHERE start_time_local IS NOT NULL
+        GROUP BY day
+        ORDER BY day ASC
+    """).fetchall()
+
+    if not rows:
+        return {"atl": None, "ctl": None, "tsb": None, "tcl_today": None, "tcl_yesterday": None}
+
+    min_day = _parse_yyyy_mm_dd(rows[0]["day"])
+    max_day = _parse_yyyy_mm_dd(rows[-1]["day"])
+
+    end_day = max_day
+    start_day = end_day - timedelta(days=days_back - 1)
+
+    tcl_by_day = {r["day"]: float(r["tcl"] or 0) for r in rows}
+
+    xs = []
+    loads = []
+    d = start_day
+    while d <= end_day:
+        ds = d.isoformat()
+        xs.append(ds)
+        loads.append(tcl_by_day.get(ds, 0.0))
+        d += timedelta(days=1)
+
+    atl = _ema(loads, 7)
+    ctl = _ema(loads, 42)
+    tsb = [c - a for c, a in zip(ctl, atl)]
+
+    # today / yesterday tcl
+    tcl_today = loads[-1] if loads else None
+    tcl_yesterday = loads[-2] if len(loads) >= 2 else None
+
+    return {
+        "atl": atl[-1] if atl else None,
+        "ctl": ctl[-1] if ctl else None,
+        "tsb": tsb[-1] if tsb else None,
+        "tcl_today": tcl_today,
+        "tcl_yesterday": tcl_yesterday,
+    }
+
+def get_recovery_flags(conn):
+    """
+    Kleine ‘recovery sanity checks’ op basis van daily_metrics:
+    - HRV drop (laatste 3 vs vorige 14)
+    - sleep low
+    - stress high
+    """
+    rows = conn.execute("""
+        SELECT day, hrv_rmssd, sleep_score, avg_stress
+        FROM daily_metrics
+        ORDER BY day DESC
+        LIMIT 20
+    """).fetchall()
+
+    data = [dict(r) for r in rows]
+    if not data:
+        return {"hrv_drop": False, "sleep_low": False, "stress_high": False}
+
+    def avg(vals):
+        vals = [v for v in vals if v is not None]
+        return sum(vals) / len(vals) if vals else None
+
+    hrv_last3 = avg([d.get("hrv_rmssd") for d in data[:3]])
+    hrv_prev14 = avg([d.get("hrv_rmssd") for d in data[3:17]])
+
+    sleep_today = data[0].get("sleep_score")
+    stress_today = data[0].get("avg_stress")
+
+    hrv_drop = (hrv_last3 is not None and hrv_prev14 is not None and hrv_last3 < (hrv_prev14 - 5))
+    sleep_low = (sleep_today is not None and sleep_today < 60)
+    stress_high = (stress_today is not None and stress_today > 25)
+
+    return {"hrv_drop": hrv_drop, "sleep_low": sleep_low, "stress_high": stress_high}    
+
 @app.route("/")
 def dashboard():
     days = int(request.args.get("days", 30))
@@ -150,6 +357,8 @@ def dashboard():
     latest = row_to_dict(latest)
 
     tcl_7d = get_tcl_7d(conn)
+    tl = get_training_load_today(conn)          # atl/ctl/tsb
+    flags = get_recovery_flags(conn)  
     readiness = readiness_score(latest, tcl_7d=tcl_7d, tcl_target_7d=300)
 
     latest_hume = conn.execute("""
@@ -179,6 +388,12 @@ def dashboard():
     return render_template(
         "dashboard.html",
         latest=latest,
+        tcl_7d=tcl_7d,
+        tcl_target_7d=300,
+        tsb=tl.get("tsb"),
+        atl=tl.get("atl"),
+        ctl=tl.get("ctl"),
+        flags=flags,
         readiness=readiness,
         readiness_score=readiness["score"],
         USER_NAME=USER_NAME,
@@ -412,6 +627,81 @@ def api_pro_weekly_analysis():
 def api_pro_analysis():
     return api_pro_weekly_analysis()
 
+
+def _parse_yyyy_mm_dd(s: str) -> date:
+    return datetime.strptime(s, "%Y-%m-%d").date()
+
+def _ema_series(days, loads, tau_days: int):
+    """
+    TrainingPeaks-achtige EMA:
+      ema[t] = ema[t-1] + (load[t] - ema[t-1]) * (1/tau)
+    tau=7 (ATL), tau=42 (CTL)
+    """
+    if not days:
+        return []
+    k = 1.0 / float(tau_days)
+    ema = []
+    prev = float(loads[0])
+    ema.append(prev)
+    for i in range(1, len(loads)):
+        x = float(loads[i])
+        prev = prev + (x - prev) * k
+        ema.append(prev)
+    return ema
+
+@app.route("/api/training_load")
+def api_training_load():
+    days = int(request.args.get("days", 180))
+    conn = get_conn()
+
+    # Daily TCL from Strava activities (tcl) grouped by date
+    rows = conn.execute("""
+        SELECT
+          date(start_time_local) AS day,
+          COALESCE(SUM(tcl), 0)  AS tcl
+        FROM strava_activities
+        WHERE start_time_local IS NOT NULL
+        GROUP BY day
+        ORDER BY day ASC
+    """).fetchall()
+
+    if not rows:
+        return jsonify([])
+
+    # Build continuous day range (fill missing days with 0)
+    min_day = _parse_yyyy_mm_dd(rows[0]["day"])
+    max_day = _parse_yyyy_mm_dd(rows[-1]["day"])
+
+    # Limit to last N days
+    end_day = max_day
+    start_day = end_day - timedelta(days=days - 1)
+
+    tcl_by_day = {r["day"]: float(r["tcl"] or 0) for r in rows}
+
+    xs = []
+    loads = []
+    d = start_day
+    while d <= end_day:
+        ds = d.isoformat()
+        xs.append(ds)
+        loads.append(tcl_by_day.get(ds, 0.0))
+        d += timedelta(days=1)
+
+    atl = _ema_series(xs, loads, tau_days=7)    # fatigue
+    ctl = _ema_series(xs, loads, tau_days=42)   # fitness
+    tsb = [c - a for c, a in zip(ctl, atl)]     # form
+
+    out = []
+    for i in range(len(xs)):
+        out.append({
+            "day": xs[i],
+            "tcl": round(loads[i], 2),
+            "atl": round(atl[i], 2),
+            "ctl": round(ctl[i], 2),
+            "tsb": round(tsb[i], 2),
+        })
+
+    return jsonify(out)
 
 if __name__ == "__main__":
     app.run(debug=True)

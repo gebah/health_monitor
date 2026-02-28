@@ -439,28 +439,55 @@ html[data-theme="dark"] .dial{
 }
 
 .container {
-
   max-width: 1500px;
-
 }
 
 
 .grid3 {
-
-grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
 }
 
 
 .metric-card {
-
-justify-content: space-between;
-
+  justify-content: space-between;
 }
 
 
 .chart-card {
-
-height: 420px;
-
+  height: 420px;
 }
+
+/* Form badge (TSB) */
+.form-badge{
+  max-width: 520px;
+  display:flex;
+  align-items:baseline;
+  gap:12px;
+}
+.form-badge__title{
+  font-weight:800;
+  font-size:14px;
+}
+.form-badge__value{
+  font-weight:900;
+  font-size:22px;
+  margin-left:auto;
+}
+.form-badge__label{
+  font-weight:800;
+  font-size:13px;
+  opacity:.9;
+}
+
+.form-badge--good .form-badge__value,
+.form-badge--good .form-badge__label{ color: var(--good); }
+
+.form-badge--ok .form-badge__value,
+.form-badge--ok .form-badge__label{ color: var(--ok); }
+
+.form-badge--bad .form-badge__value,
+.form-badge--bad .form-badge__label{ color: var(--bad); }
+
+.metric-card--good .metric-value { color: var(--good); }
+.metric-card--ok   .metric-value { color: var(--ok); }
+.metric-card--bad  .metric-value { color: var(--bad); }
