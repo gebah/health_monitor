@@ -23,6 +23,7 @@
 })();
 
 // Dark mode toggle (localStorage)
+// Dark mode toggle (localStorage) - default LIGHT
 (function () {
   const toggle = document.getElementById("themeToggle");
   const root = document.documentElement;
@@ -32,11 +33,18 @@
     localStorage.setItem("hm_theme", theme);
   };
 
+  // default: light (als er niks is opgeslagen)
   const saved = localStorage.getItem("hm_theme");
-  if (saved === "dark" || saved === "light") apply(saved);
+  if (saved === "dark" || saved === "light") {
+    root.setAttribute("data-theme", saved);
+  } else {
+    apply("light");
+  }
 
   if (toggle) {
-    toggle.addEventListener("click", () => {
+    toggle.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       const current = root.getAttribute("data-theme") || "light";
       apply(current === "dark" ? "light" : "dark");
     });

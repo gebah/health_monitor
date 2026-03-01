@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+
+{% block body_attrs %}
+data-days="{{ days }}"
+data-readiness-score="{{ readiness_score }}"
+data-user-name="{{ USER_NAME }}"
+data-user-height="{{ USER_HEIGHT }}"
+data-target-weight="90"
+data-target-lean="70"
+data-target-bf="17.5"
+data-weekly-kcal-target="17500"
+{% endblock %}
+
+{% block content %}
+
+<h1>Health Monitor</h1>
+<p class="muted">Laatste update: {{ latest.day if latest else "—" }}</p>
+
+<h2>{{ USER_NAME }} – Body (Hume)</h2>
+<table class="summary-table">
+  <tr><th>Metric</th><th>Value</th><th>vs target</th></tr>
+
+  <tr>
+    <td>Gewicht</td>
+    <td>{{ latest_hume.weight_kg | round(1) if latest_hume and latest_hume.weight_kg is not none else "—" }} kg</td>
+    <td>
+      {% if delta_weight is not none %}
+        <span class="{{ 'good' if delta_weight <= 0 else 'bad' }}">{{ delta_weight | round(1) }}</span>
+        {% if delta_weight > 0 %} boven{% else %} onder{% endif %}
+      {% else %}—{% endif %}
+    </td>
+  </tr>
+
+  <tr>
+    <td>Lean mass</td>
+    <td>{{ latest_hume.lean_mass_kg | round(1) if latest_hume and latest_hume.lean_mass_kg is not none else "—" }} kg</td>
+    <td>
+      {% if delta_lean is not none %}
+        <span class="{{ 'good' if delta_lean >= 0 else 'bad' }}">{{ delta_lean | round(1) }}</span>
+        {% if delta_lean > 0 %} boven{% else %} onder{% endif %}
+      {% else %}—{% endif %}
+    </td>
+  </tr>
+
+  <tr>
+    <td>Body fat</td>
+    <td>{{ latest_hume.body_fat_pct | round(1) if latest_hume and latest_hume.body_fat_pct is not none else "—" }} %</td>
+    <td>
+      {% if delta_bf is not none %}
+        <span class="{{ 'good' if delta_bf <= 0 else 'bad' }}">{{ delta_bf | round(1) }}</span>
+        {% if delta_bf > 0 %} boven{% else %} onder{% endif %}
+      {% else %}—{% endif %}
+    </td>
+  </tr>
+
+  <tr>
+    <td>Lean Body Mass Index (LBMI)</td>
+    <td>{{ lbmi | round(2) if lbmi is not none else "—" }}</td>
+    <td>
+      {% if delta_lbmi is not none %}
+        <span class="{{ 'good' if delta_lbmi >= 0 else 'bad' }}">{{ delta_lbmi | round(2) }}</span>
+        {% if delta_lbmi > 0 %} boven{% else %} onder{% endif %}
+      {% else %}—{% endif %}
+    </td>
+  </tr>
+</table>
+
+<h2>Training readiness</h2>
+{% if readiness %}
+  {% set rs = readiness.score %}
+  {% set tone = "good" if rs >= 75 else ("ok" if rs >= 50 else "bad") %}
+
+  <div class="readiness card">
+    <div class="readiness__top">
+      <div class="dial dial--{{ tone }}" style="--p: {{ rs }};">
+        <div class="dial__inner">
+          <div class="dial__value">{{ rs }}</div>
+          <div class="dial__label">{{ readiness.label }}</div>
+        </div>
+      </div>
+
+      <div class="readiness__summary">
+        <div class="readiness__title">Today</div>
+
+        <div class="readiness__advice {{ readiness.tone }}">
+          <div style="font-weight:700; margin-bottom:2px;">
+            {{ readiness.icon }} {{ readiness.state }}
+          </div>
+
+          <div>{{ readiness.advice }}</div>
+
+          {% if readiness.why %}
+            <div class="muted" style="margin-top:6px; font-size:12px;">
+              {{ readiness.why }}
+            </div>
+          {% endif %}
+        </div>
+
+      </div>
+    </div>
+
+    <div class="readiness__bars">
+      {% set c = readiness.components %}
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">HRV</div><div class="bar__val">{{ c.hrv }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.hrv }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">Sleep</div><div class="bar__val">{{ c.sleep }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.sleep }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">Stress</div><div class="bar__val">{{ c.stress }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.stress }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">Body Battery</div><div class="bar__val">{{ c.bb }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.bb }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row">
+          <div class="bar__name">Training load (7d TCL)</div>
+          <div class="bar__val">{{ readiness.tcl_7d }} / {{ readiness.tcl_target_7d }}</div>
+        </div>
+        <div class="bar__track">
+          <div class="bar__fill" style="--p: {{ c.load if c.load is not none else 0 }};"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% else %}
+  <div class="card">Nog geen readiness beschikbaar.</div>
+{% endif %}
+
+<h2>Latest daily metrics</h2>
+{% if latest %}
+  {% set sleep_seconds = latest.get("sleep_seconds") %}
+  {% set sleep_hours = (sleep_seconds / 3600) if sleep_seconds else None %}
+
+  <div class="grid3">
+    <div class="card metric-card">
+      <div class="metric-title">Sleep score</div>
+      <div class="metric-value">{{ latest.get("sleep_score") if latest.get("sleep_score") is not none else "—" }}</div>
+    </div>
+
+    <div class="card metric-card">
+      <div class="metric-title">Sleep (hours)</div>
+      <div class="metric-value">{% if sleep_hours is not none %}{{ sleep_hours | round(2) }}{% else %}—{% endif %}</div>
+    </div>
+
+    <div class="card metric-card">
+      <div class="metric-title">Resting HR</div>
+      <div class="metric-value">{{ latest.get("resting_hr") if latest.get("resting_hr") is not none else "—" }}</div>
+    </div>
+
+    <div class="card metric-card">
+      <div class="metric-title">Avg stress</div>
+      <div class="metric-value">{{ latest.get("avg_stress") if latest.get("avg_stress") is not none else "—" }}</div>
+    </div>
+
+    <div class="card metric-card">
+      <div class="metric-title">HRV (RMSSD)</div>
+      <div class="metric-value">{{ latest.get("hrv_rmssd") if latest.get("hrv_rmssd") is not none else "—" }}</div>
+    </div>
+
+    <div class="card metric-card">
+      <div class="metric-title">Body Battery</div>
+      <div class="metric-value metric-small">
+        <div>High: {{ latest.get("body_battery_high") if latest.get("body_battery_high") is not none else "—" }}</div>
+        <div>Low: {{ latest.get("body_battery_low") if latest.get("body_battery_low") is not none else "—" }}</div>
+      </div>
+    </div>
+
+    <div class="card metric-card" id="form_metric" style="display:none;">
+      <div class="metric-title">Form (TSB) <span class=muted>today</span></div>
+      <div class="metric-value" id="form_metric_value">—</div>
+      <div class="muted" id="form_metric_label">—</div>
+      <div class="muted" id="form_metric_load" style="font-size:12px;">ATL — • CTL —</div>
+      <div class="muted" id="form_metric_advice" style="font-size:12px; margin-top:4px;">—</div>
+    </div>
+  </div>
+
+{% else %}
+  <p>Geen daily metrics gevonden.</p>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+{% endblock %}

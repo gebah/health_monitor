@@ -1,8 +1,11 @@
-from flask import Flask, render_template, request, jsonify, redirect, flash
+from flask import Flask, render_template, request, jsonify, redirect, current_app, url_for, flash
 from datetime import date, datetime, timedelta
 from collector import sync_garmin, sync_strava, sync_all
 
 import sqlite3
+import json
+import csv
+import io
 
 app = Flask(__name__)
 app.secret_key = "secret"
@@ -10,14 +13,42 @@ app.secret_key = "secret"
 DB = "/home/gba/Documenten/PycharmProjects/health_monitor/garmin.sqlite"
 
 USER_NAME = "Gé"
-USER_HEIGHT = 1.80
-
+USER_HEIGHT = 1.92
 
 def get_conn():
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
     return conn
 
+def ensure_cache_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_cache (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+def cache_set(conn, key, obj):
+    ensure_cache_table(conn)
+    conn.execute("""
+        INSERT INTO app_cache(key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            value=excluded.value,
+            updated_at=excluded.updated_at
+    """, (key, json.dumps(obj), datetime.utcnow().isoformat()))
+    conn.commit()
+
+def cache_get(conn, key, default=None):
+    ensure_cache_table(conn)
+    row = conn.execute("SELECT value FROM app_cache WHERE key=?", (key,)).fetchone()
+    if not row:
+        return default
+    try:
+        return json.loads(row["value"])
+    except Exception:
+        return default
 
 def row_to_dict(row):
     return dict(row) if row else {}
@@ -200,6 +231,24 @@ def readiness_score(
         "state": state,
     }
 
+@app.context_processor
+def inject_globals():
+    # user: neem jouw globale USER_NAME (niet app.config)
+    user_name = USER_NAME
+
+    # readiness: lees uit cache (super snel)
+    readiness_hdr = None
+    try:
+        with get_conn() as conn:
+            readiness_hdr = cache_get(conn, "readiness_header", default=None)
+    except Exception:
+        readiness_hdr = None
+
+    return {
+        "USER_NAME": user_name,
+        "READINESS_HEADER": readiness_hdr,  # dict of None
+    }
+
 def get_tcl_7d(conn):
     """
     Som van TCL over de laatste 7 dagen (incl. vandaag), op basis van start_time_local.
@@ -330,91 +379,194 @@ def get_recovery_flags(conn):
 
     return {"hrv_drop": hrv_drop, "sleep_low": sleep_low, "stress_high": stress_high}    
 
+def _to_float(x):
+    if x is None:
+        return None
+    s = str(x).strip()
+    if s == "":
+        return None
+    s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+def import_fitatu_meal_csv(conn, file_storage) -> dict:
+    """
+    Fitatu 'maaltijdplan/maaltijd' CSV:
+    - meerdere regels per dag (producten)
+    - aggregeert naar 1 rij per dag in fitatu_daily
+    """
+    raw = file_storage.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+
+    # map CSV kolommen -> jouw fitatu_daily kolommen
+    COL_DAY = "Datum"
+    COL_KCAL = "calorieën (kcal)"
+    COL_P = "Eiwitten (g)"
+    COL_C = "Koolhydraten (g)"
+    COL_F = "Vetten (g)"
+    COL_FIBER = "Vezels (g)"
+
+    per_day = {}
+    bad_rows = 0
+
+    for row in reader:
+        day = (row.get(COL_DAY) or "").strip()
+        if not day:
+            continue
+
+        kcal = _to_float(row.get(COL_KCAL))
+        p = _to_float(row.get(COL_P))
+        c = _to_float(row.get(COL_C))
+        f = _to_float(row.get(COL_F))
+        fib = _to_float(row.get(COL_FIBER))
+
+        # skip echt lege regels
+        if kcal is None and p is None and c is None and f is None and fib is None:
+            bad_rows += 1
+            continue
+
+        d = per_day.setdefault(day, {"calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0, "fiber_g": 0.0})
+        d["calories"] += kcal or 0.0
+        d["protein_g"] += p or 0.0
+        d["carbs_g"] += c or 0.0
+        d["fat_g"] += f or 0.0
+        d["fiber_g"] += fib or 0.0
+
+    # UPSERT per dag
+    upserts = 0
+    for day, t in per_day.items():
+        conn.execute("""
+            INSERT INTO fitatu_daily(day, calories, protein_g, carbs_g, fat_g, fiber_g)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(day) DO UPDATE SET
+              calories=excluded.calories,
+              protein_g=excluded.protein_g,
+              carbs_g=excluded.carbs_g,
+              fat_g=excluded.fat_g,
+              fiber_g=excluded.fiber_g
+        """, (day, t["calories"], t["protein_g"], t["carbs_g"], t["fat_g"], t["fiber_g"]))
+        upserts += 1
+
+    conn.commit()
+
+    days_sorted = sorted(per_day.keys())
+    return {
+        "days": len(per_day),
+        "min_day": days_sorted[0] if days_sorted else None,
+        "max_day": days_sorted[-1] if days_sorted else None,
+        "bad_rows": bad_rows,
+        "upserts": upserts,
+    }
+
 @app.route("/")
-def dashboard():
+def home():
     days = int(request.args.get("days", 30))
-    act_limit = int(request.args.get("acts", 25))
-    activity_type = request.args.get("type", "all")
 
-    conn = get_conn()  # <-- FIX: conn bestaat vanaf hier
+    with get_conn() as conn:
+        latest = conn.execute("SELECT * FROM daily_metrics ORDER BY day DESC LIMIT 1").fetchone()
+        latest = row_to_dict(latest)
 
-    # types voor dropdown (uit activities)
-    types = [r["t"] for r in conn.execute("""
-        SELECT DISTINCT activity_type AS t
-        FROM activities
-        WHERE activity_type IS NOT NULL AND activity_type != ''
-        ORDER BY t
-    """).fetchall()]
+        tcl_7d = get_tcl_7d(conn)
+        tl = get_training_load_today(conn)
+        flags = get_recovery_flags(conn)
 
-    latest_activities = get_latest_activities(conn, limit=act_limit, activity_type=activity_type)
+        readiness = readiness_score(
+            latest,
+            tcl_7d=tcl_7d,
+            tcl_target_7d=300,
+            tsb=tl.get("tsb"),
+            atl=tl.get("atl"),
+            ctl=tl.get("ctl"),
+            flags=flags
+        )
 
-    latest = conn.execute("""
-        SELECT *
-        FROM daily_metrics
-        ORDER BY day DESC
-        LIMIT 1
-    """).fetchone()
-    latest = row_to_dict(latest)
+        # header cache (als je dit al hebt: laten)
+        cache_set(conn, "readiness_header", {
+            "score": readiness.get("score"),
+            "label": readiness.get("label"),
+            "icon": readiness.get("icon"),
+            "tone": readiness.get("tone"),
+            "state": readiness.get("state"),
+            "why": readiness.get("why"),
+        })
 
-    tcl_7d = get_tcl_7d(conn)
-    tl = get_training_load_today(conn)          # atl/ctl/tsb
-    flags = get_recovery_flags(conn)  
-    readiness = readiness_score(latest, tcl_7d=tcl_7d, tcl_target_7d=300)
+        latest_hume = conn.execute("SELECT * FROM hume_body ORDER BY day DESC LIMIT 1").fetchone()
+        latest_hume = dict(latest_hume) if latest_hume else None
 
-    latest_hume = conn.execute("""
-        SELECT *
-        FROM hume_body
-        ORDER BY day DESC
-        LIMIT 1
-    """).fetchone()
-    latest_hume = dict(latest_hume) if latest_hume else None
-
-    # deltas/lbmi (veilig)
     delta_weight = delta_lean = delta_bf = lbmi = delta_lbmi = None
     if latest_hume:
         w = latest_hume.get("weight_kg")
         lean = latest_hume.get("lean_mass_kg")
         bf = latest_hume.get("body_fat_pct")
-
-        if w is not None:
-            delta_weight = w - 90
-        if bf is not None:
-            delta_bf = bf - 17.5
+        if w is not None: delta_weight = w - 90
+        if bf is not None: delta_bf = bf - 17.5
         if lean is not None:
             delta_lean = lean - 70
             lbmi = lean / (USER_HEIGHT ** 2)
             delta_lbmi = lbmi - (70 / (USER_HEIGHT ** 2))
 
     return render_template(
-        "dashboard.html",
+        "home.html",
+        active_page="home",
+        days=days,
         latest=latest,
-        tcl_7d=tcl_7d,
-        tcl_target_7d=300,
-        tsb=tl.get("tsb"),
-        atl=tl.get("atl"),
-        ctl=tl.get("ctl"),
-        flags=flags,
         readiness=readiness,
         readiness_score=readiness["score"],
         USER_NAME=USER_NAME,
         USER_HEIGHT=USER_HEIGHT,
-        days=days,
-        act_limit=act_limit,
-        activity_type=activity_type,
-        types=types,
         latest_hume=latest_hume,
         delta_weight=delta_weight,
         delta_lean=delta_lean,
         delta_bf=delta_bf,
         lbmi=lbmi,
         delta_lbmi=delta_lbmi,
-        status_emoji=None,
-        status_text=None,
-        advice=None,
-        latest_activities=latest_activities,
     )
 
-    
+@app.route("/hume/charts")
+def hume_charts():
+    days = int(request.args.get("days", 180))
+    return render_template("hume_charts.html", active_page="hume", days=days, USER_HEIGHT=USER_HEIGHT)
+
+@app.route("/trends")
+def trends():
+    days = int(request.args.get("days", 60))
+    return render_template("trends.html", active_page="trends", days=days)
+
+@app.route("/training-load")
+def training_load_page():
+    days = int(request.args.get("days", 30))
+    return render_template(
+        "training_load.html",
+        active_page="training_load",
+        days=days
+    )
+
+@app.route("/activities")
+def activities_page():
+    act_limit = int(request.args.get("acts", 50))
+    activity_type = request.args.get("type", "all")
+
+    with get_conn() as conn:
+        types = [r["t"] for r in conn.execute("""
+            SELECT DISTINCT activity_type AS t
+            FROM activities
+            WHERE activity_type IS NOT NULL AND activity_type != ''
+            ORDER BY t
+        """).fetchall()]
+        latest_activities = get_latest_activities(conn, limit=act_limit, activity_type=activity_type)
+
+    return render_template(
+        "activities.html",
+        active_page="activities",
+        latest_activities=latest_activities,
+        types=types,
+        act_limit=act_limit,
+        activity_type=activity_type
+    )
+
 
 @app.route("/api/daily_metrics")
 def api_daily():
@@ -651,7 +803,7 @@ def _ema_series(days, loads, tau_days: int):
 
 @app.route("/api/training_load")
 def api_training_load():
-    days = int(request.args.get("days", 180))
+    days = int(request.args.get("days", 30))
     conn = get_conn()
 
     # Daily TCL from Strava activities (tcl) grouped by date
@@ -702,6 +854,100 @@ def api_training_load():
         })
 
     return jsonify(out)
+
+@app.route("/hume", methods=["GET", "POST"])
+def hume():
+
+    conn = get_conn()
+
+    if request.method == "POST":
+
+        conn.execute("""
+            INSERT INTO hume_body (
+                day,
+                weight_kg,
+                body_fat_pct,
+                muscle_mass_kg,
+                lean_mass_kg,
+                visceral_fat_index,
+                body_water_pct,
+                body_cell_mass_kg
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(day) DO UPDATE SET
+                weight_kg=excluded.weight_kg,
+                body_fat_pct=excluded.body_fat_pct,
+                muscle_mass_kg=excluded.muscle_mass_kg,
+                lean_mass_kg=excluded.lean_mass_kg,
+                visceral_fat_index=excluded.visceral_fat_index,
+                body_water_pct=excluded.body_water_pct,
+                body_cell_mass_kg=excluded.body_cell_mass_kg
+        """, (
+
+            request.form["day"],
+            request.form.get("weight_kg"),
+            request.form.get("body_fat_pct"),
+            request.form.get("muscle_mass_kg"),
+            request.form.get("lean_mass_kg"),
+            request.form.get("visceral_fat_index"),
+            request.form.get("body_water_pct"),
+            request.form.get("body_cell_mass_kg"),
+
+        ))
+
+        conn.commit()
+        conn.close()
+
+        # dit is correct
+        return redirect(url_for("hume"))
+
+
+    entries = conn.execute("""
+        SELECT *
+        FROM hume_body
+        ORDER BY day DESC
+    """).fetchall()
+
+    conn.close()
+
+    return render_template(
+        "hume.html",
+        entries=entries,
+        active_page="hume"
+    )
+
+@app.route("/fitatu", methods=["GET", "POST"])
+def fitatu():
+    if request.method == "POST":
+        f = request.files.get("file")
+        if not f or f.filename == "":
+            flash("Kies eerst een CSV bestand.", "error")
+            return redirect(url_for("fitatu"))
+
+        with get_conn() as conn:
+            stats = import_fitatu_meal_csv(conn, f)
+
+            # extra check: wat is nu de laatste dag in de DB?
+            last = conn.execute("SELECT MAX(day) AS max_day FROM fitatu_daily").fetchone()
+            last_day = last["max_day"] if last else None
+
+        flash(
+            f"Fitatu import OK: {stats['days']} dagen ({stats['min_day']} → {stats['max_day']}). "
+            f"DB laatste dag: {last_day}. Bad rows: {stats['bad_rows']}",
+            "success"
+        )
+        return redirect(url_for("fitatu"))
+
+    # Optioneel: toon laatste entries in de pagina (handig om te zien dat import gelukt is)
+    with get_conn() as conn:
+        entries = conn.execute("""
+            SELECT day, calories, protein_g, carbs_g, fat_g, fiber_g
+            FROM fitatu_daily
+            ORDER BY day DESC
+            LIMIT 31
+        """).fetchall()
+
+    return render_template("fitatu.html", active_page="fitatu", days=180, weekly_kcal_target=17500)
+
 
 if __name__ == "__main__":
     app.run(debug=True)

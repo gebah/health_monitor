@@ -212,25 +212,30 @@ def get_hume_history(days: int = 180):
 # FITATU (weekly)
 # ------------------------
 
-def get_fitatu_weekly(days: int = 365):
+def get_fitatu_weekly(days: int = 365, limit_weeks: int = 104):
     """
     Output: [{week_start, calories, protein_g, carbs_g, fat_g, fiber_g}]
     """
-    conn = get_conn()
-    rows = conn.execute("""
-        SELECT
-          date(day, '-' || ((strftime('%w',day) + 6) % 7) || ' days') AS week_start,
-          SUM(calories) AS calories,
-          SUM(protein_g) AS protein_g,
-          SUM(carbs_g)   AS carbs_g,
-          SUM(fat_g)     AS fat_g,
-          SUM(fiber_g)   AS fiber_g
-        FROM fitatu_daily
-        WHERE day IS NOT NULL
-        GROUP BY week_start
-        ORDER BY week_start DESC
-        LIMIT 104
-    """).fetchall()
+    days = max(7, int(days))
+    limit_weeks = max(4, int(limit_weeks))
+
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT
+              date(day, '-' || ((strftime('%w', day) + 6) % 7) || ' days') AS week_start,
+              COALESCE(SUM(calories), 0)  AS calories,
+              COALESCE(SUM(protein_g), 0) AS protein_g,
+              COALESCE(SUM(carbs_g), 0)   AS carbs_g,
+              COALESCE(SUM(fat_g), 0)     AS fat_g,
+              COALESCE(SUM(fiber_g), 0)   AS fiber_g
+            FROM fitatu_daily
+            WHERE day IS NOT NULL
+              AND date(day) >= date('now', ?)
+            GROUP BY week_start
+            ORDER BY week_start DESC
+            LIMIT ?
+        """, (f"-{days} day", limit_weeks)).fetchall()
+
     return [dict(r) for r in rows]
 
 # ------------------------

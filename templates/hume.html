@@ -1,88 +1,66 @@
 {% extends "base.html" %}
-{% block title %}Hume{% endblock %}
+{% block title %}Hume invoer{% endblock %}
+{% block page_title %}Hume invoer{% endblock %}
 
 {% block content %}
-<h1 style="display:flex;align-items:center;gap:10px;">
-  <img src="{{ url_for('static', filename='img/hume.png') }}" width="24">
-  Hume invoer
-</h1>
+  <div class="form-card">
+      <form method="post">
+        <div class="form-grid">
+          <label>Datum</label>
+          <input type="date" name="day" required>
 
-<form method="post" class="form-grid">
-  
-  <div class="form-row">
-    <label>Datum</label>
-    <input type="date" name="day" value="{{ today }}">
-  </div>
+          <label>Gewicht (kg)</label>
+          <input type="number" step="0.1" name="weight_kg">
 
-  <div class="form-row">
-    <label>Gewicht (kg)</label>
-    <input type="number" step="0.1" name="weight">
-  </div>
+          <label>Vet %</label>
+          <input type="number" step="0.1" name="body_fat_pct">
 
-  <div class="form-row">
-    <label>Vet %</label>
-    <input type="number" step="0.1" name="bodyfat">
-  </div>
+          <label>Spiermassa (kg)</label>
+          <input type="number" step="0.1" name="muscle_mass_kg">
 
-  <div class="form-row">
-    <label>Spiermassa</label>
-    <input type="number" step="0.1" name="muscle">
-  </div>
+          <label>Lean mass (kg)</label>
+          <input type="number" step="0.1" name="lean_mass_kg">
 
-  <div class="form-row">
-    <label>Lean mass (kg)</label>
-    <input type="number" step="0.1" name="lean">
-  </div>
+          <label>Visceraal vet index</label>
+          <input type="number" step="0.1" name="visceral_fat_index">
 
-  <div class="form-row">
-    <label>Visceral fat index</label>
-    <input type="number" step="0.1" name="visc">
-  </div>
+          <label>Body water (%)</label>
+          <input type="number" step="0.1" name="body_water_pct">
 
-  <div class="form-row">
-    <label>Body water (%)</label>
-    <input type="number" step="0.1" name="water">
-  </div>
-
-  <div class="form-row">
-    <label>Body cell mass (kg)</label>
-    <input type="number" step="0.1" name="bcm">
-  </div>
+          <label>Body cell mass (kg)</label>
+          <input type="number" step="0.1" name="body_cell_mass_kg">
+    </div>
 
   <div class="form-actions">
-    <button class="btn">Opslaan</button>
+    <button class="btn" type="submit">Opslaan</button>
+  </div>
+</form>
   </div>
 
-</form>
-<hr>
-
-<table>
-
-<tr>
-    <th>Datum</th>
-    <th>Gewicht</th>
-    <th>Vet %</th>
-    <th>Spiermassa</th>
-    <th>Lean</th>
-    <th>Visc</th>
-    <th>Water%</th>
-    <th>BCM</th>
-</tr>
-
-{% for r in rows %}
-
-<tr>
-    <td>{{ r.day }}</td>
-    <td>{{ r.weight_kg }}</td>
-    <td>{{ r.body_fat_pct }}</td>
-    <td>{{ r.muscle_mass_kg }}</td>
-    <td>{{ r.lean_mass_kg }}</td>
-    <td>{{ r.visceral_fat_index }}</td>
-    <td>{{ r.body_water_pct }}</td>
-    <td>{{ r.body_cell_mass_kg }}</td>
-</tr>
-
-{% endfor %}
-
-</table>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Datum</th>
+        <th>Gewicht</th>
+        <th>Vet %</th>
+        <th>Spiermassa</th>
+        <th>Lean mass</th>
+        <th>Visceraal</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in entries %}
+        <tr>
+          <td>{{ r["day"] }}</td>
+          <td>{{ r["weight_kg"] }}</td>
+          <td>{{ r["body_fat_pct"] }}</td>
+          <td>{{ r["muscle_mass_kg"] }}</td>
+          <td>{{ r["lean_mass_kg"] }}</td>
+          <td>{{ r["visceral_fat_index"] }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" style="opacity:.75;">Nog geen Hume data gevonden.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
 {% endblock %}

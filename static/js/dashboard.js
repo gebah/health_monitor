@@ -577,7 +577,9 @@ document.addEventListener("DOMContentLoaded", () => {
   plotIfExists("pro_analysis_chart", loadProAnalysis);
   plotIfExists("hume_mass_chart", loadHumeBody);
   plotIfExists("lbmi_chart", loadLBMI);
-  plotIfExists("training_load_chart", loadTrainingLoad)
-});
+  plotIfExists("training_load_chart", loadTrainingLoad);
 
-loadFormMetric();
+  if (document.getElementById("form_metric")) {
+    loadFormMetric();
+  }
+});

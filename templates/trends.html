@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Trends{% endblock %}
+
+{% block body_attrs %}
+data-days="{{ days }}"
+{% endblock %}
+
+{% block content %}
+<h1>Trends (laatste {{ days }} dagen)</h1>
+
+<div class="charts-grid">
+  <div class="card chart-card chart-span-2"><b>Sleep</b><div id="sleep_chart" class="chart"></div></div>
+  <div class="card chart-card"><b>HRV (RMSSD)</b><div id="hrv_chart" class="chart"></div></div>
+  <div class="card chart-card"><b>Stress</b><div id="stress_chart" class="chart"></div></div>
+  <div class="card chart-card"><b>Resting HR</b><div id="rhr_chart" class="chart"></div></div>
+  <div class="card chart-card chart-span-2"><b>Body Battery (Low–High)</b><div id="bb_chart" class="chart"></div></div>
+</div>
+
+<h2>Activities trends</h2>
+<div class="grid2">
+  <div class="card chart-card"><b>VO2max</b><div id="vo2_chart" class="chart"></div></div>
+  <div class="card chart-card"><b>Training effect</b><div id="te_chart" class="chart"></div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+{% endblock %}

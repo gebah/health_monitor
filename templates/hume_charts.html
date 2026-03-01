@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Hume{% endblock %}
+
+{% block body_attrs %}
+data-days="{{ days }}"
+data-user-height="{{ USER_HEIGHT }}"
+data-target-weight="90"
+data-target-lean="70"
+data-target-bf="17.5"
+{% endblock %}
+
+{% block content %}
+<h1>Hume</h1>
+
+<div class="grid2">
+  <div class="card chart-card"><b>Hume – Mass (kg)</b><div id="hume_mass_chart" class="chart-lg"></div></div>
+  <div class="card chart-card"><b>Hume – Composition</b><div id="hume_comp_chart" class="chart-lg"></div></div>
+  <div class="card chart-card span2"><b>Lean Body Mass Index (LBMI)</b><div id="lbmi_chart" class="chart"></div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+{% endblock %}

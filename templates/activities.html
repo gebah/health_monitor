@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Activities{% endblock %}
+
+{% block content %}
+<h1>Activities</h1>
+
+<form method="get" class="filters">
+  <label>Activiteiten:</label>
+  <select name="acts" onchange="this.form.submit()">
+    <option value="10" {{ "selected" if act_limit==10 else "" }}>10</option>
+    <option value="25" {{ "selected" if act_limit==25 else "" }}>25</option>
+    <option value="50" {{ "selected" if act_limit==50 else "" }}>50</option>
+  </select>
+
+  <label class="ml12">Type:</label>
+  <select name="type" onchange="this.form.submit()">
+    <option value="all" {{ "selected" if activity_type=="all" else "" }}>All</option>
+    {% for t in types %}
+      <option value="{{ t }}" {{ "selected" if activity_type==t else "" }}>{{ t }}</option>
+    {% endfor %}
+  </select>
+</form>
+
+{% if latest_activities and latest_activities|length %}
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Type</th>
+          <th>Naam</th>
+          <th>Afstand</th>
+          <th>Duur</th>
+          <th>HR</th>
+          <th>Power</th>
+          <th>TE</th>
+          <th>VO2</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in latest_activities %}
+          <tr class="activity-row">
+            <td>{{ a.start_time_local }}</td>
+            <td>{{ a.activity_type or "—" }}</td>
+            <td class="activity-main">{{ a.activity_name or "—" }}</td>
+            <td>
+              {% if a.distance_m is not none %}
+                {{ (a.distance_m / 1000) | round(1) }} km
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if a.duration_s is not none %}
+                {{ (a.duration_s / 60) | round(0) }} min
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if a.avg_hr is not none %}
+                {{ a.avg_hr | round(0) }}
+              {% else %}—{% endif %}
+              /
+              {% if a.max_hr is not none %}
+                {{ a.max_hr | round(0) }}
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if a.avg_power is not none %}
+                {{ a.avg_power | round(0) }} w
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if a.training_effect is not none %}
+                {{ a.training_effect | round(1) }}
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if a.vo2max_value is not none %}
+                {{ a.vo2max_value | round(1) }}
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="card">Geen activiteiten gevonden.</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+{% endblock %}

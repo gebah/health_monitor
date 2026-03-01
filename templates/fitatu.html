@@ -1,30 +1,30 @@
 {% extends "base.html" %}
-{% block title %}Fitatu import{% endblock %}
-{% block content %}
+{% block title %}Fitatu{% endblock %}
 
-<h1 style="display:flex;align-items:center;gap:10px;">
-  <img src="{{ url_for('static', filename='img/fitatu.jpeg') }}" width="24">
-  Fitatu import
-</h1>
+{% block body_attrs %}
+data-days="{{ days }}"
+data-weekly-kcal-target="{{ weekly_kcal_target }}"
+{% endblock %}
+
+{% block content %}
+<h1>Fitatu</h1>
 
 <div class="card">
-  <form method="post" action="/fitatu/import" enctype="multipart/form-data" class="form">
-    <label>Fitatu export (.csv)
-      <input type="file" name="file" accept=".csv" required>
-    </label>
-
+  <b>Fitatu import</b>
+  <form method="post" enctype="multipart/form-data" class="mt10">
+    <input type="file" name="file" accept=".csv">
     <button class="btn" type="submit">Importeer</button>
-    <a class="btn btn--ghost" href="/menu">Terug</a>
   </form>
-
-  {% if stats %}
-    <hr>
-    <b>Resultaat</b><br>
-    Bestand: {{ stats.file }}<br>
-    Dagen geïmporteerd: {{ stats.days }}<br>
-    Periode: {{ stats.min_day }} → {{ stats.max_day }}<br>
-    Synced at: {{ stats.synced_at }}<br>
-  {% endif %}
 </div>
 
+<div class="card chart-card mt16">
+  <b>Fitatu – Weekly kcal (stacked macros)</b>
+  <div id="fitatu_weekly_chart" class="chart-lg"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
 {% endblock %}
