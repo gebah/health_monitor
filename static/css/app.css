@@ -587,3 +587,27 @@ html[data-theme="dark"] .dial{
   .sidebar{ position:relative; height:auto; }
   .page{ padding: 14px 0 28px; }
 }
+
+.form-grid{
+  display:grid;
+  gap:14px;
+}
+
+.form-row{
+  display:grid;
+  gap:6px;
+}
+
+.form-row label{
+  font-weight:700;
+  font-size:14px;
+}
+
+.form-row input{
+  width:100%;
+  padding:10px 12px;
+  border-radius:10px;
+  border:1px solid var(--border);
+  background:var(--panel-2);
+  color:var(--text);
+}

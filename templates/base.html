@@ -17,7 +17,7 @@
 
     <nav class="snav">
       <a class="snav__item {% if active_page=='home' %}is-active{% endif %}" href="{{ url_for('home') }}">Home</a>
-      <a class="snav__item {% if active_page=='hume' %}is-active{% endif %}" href="{{ url_for('hume_charts') }}">Hume</a>
+      <a class="snav__item {% if active_page=='hume_charts' %}is-active{% endif %}" href="{{ url_for('hume_charts') }}">Hume charts</a> 
       <a class="snav__item {% if active_page=='fitatu' %}is-active{% endif %}" href="{{ url_for('fitatu') }}">Fitatu</a>
       <a class="snav__item {% if active_page=='trends' %}is-active{% endif %}" href="{{ url_for('trends') }}">Trends</a>
       <a class="snav__item {% if active_page=='training_load' %}is-active{% endif %}" href="{{ url_for('training_load_page') }}">Training Load</a>
@@ -26,6 +26,7 @@
       <div class="snav__sep"></div>
 
       <a class="snav__item {% if active_page=='collectors' %}is-active{% endif %}" href="{{ url_for('collectors') }}">Collectors</a>
+      <a class="snav__item {% if active_page=='hume' %}is-active{% endif %}" href="{{ url_for('hume') }}">Hume invoer</a>
     </nav>
   </aside>
 
