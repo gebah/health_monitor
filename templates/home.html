@@ -16,55 +16,69 @@ data-weekly-kcal-target="17500"
 
 <h1>Health Monitor</h1>
 <p class="muted">Laatste update: {{ latest.day if latest else "—" }}</p>
+<div class="card">
+  <div class="card__header">
+    <h3>Hume</h3>
+  </div>
 
-<h2>{{ USER_NAME }} – Body (Hume)</h2>
-<table class="summary-table">
-  <tr><th>Metric</th><th>Value</th><th>vs target</th></tr>
+  <div class="card__body">
 
-  <tr>
-    <td>Gewicht</td>
-    <td>{{ latest_hume.weight_kg | round(1) if latest_hume and latest_hume.weight_kg is not none else "—" }} kg</td>
-    <td>
-      {% if delta_weight is not none %}
-        <span class="{{ 'good' if delta_weight <= 0 else 'bad' }}">{{ delta_weight | round(1) }}</span>
-        {% if delta_weight > 0 %} boven{% else %} onder{% endif %}
-      {% else %}—{% endif %}
-    </td>
-  </tr>
+    {% if latest_hume %}
 
-  <tr>
-    <td>Lean mass</td>
-    <td>{{ latest_hume.lean_mass_kg | round(1) if latest_hume and latest_hume.lean_mass_kg is not none else "—" }} kg</td>
-    <td>
-      {% if delta_lean is not none %}
-        <span class="{{ 'good' if delta_lean >= 0 else 'bad' }}">{{ delta_lean | round(1) }}</span>
-        {% if delta_lean > 0 %} boven{% else %} onder{% endif %}
-      {% else %}—{% endif %}
-    </td>
-  </tr>
+    <div class="hume-grid">
 
-  <tr>
-    <td>Body fat</td>
-    <td>{{ latest_hume.body_fat_pct | round(1) if latest_hume and latest_hume.body_fat_pct is not none else "—" }} %</td>
-    <td>
-      {% if delta_bf is not none %}
-        <span class="{{ 'good' if delta_bf <= 0 else 'bad' }}">{{ delta_bf | round(1) }}</span>
-        {% if delta_bf > 0 %} boven{% else %} onder{% endif %}
-      {% else %}—{% endif %}
-    </td>
-  </tr>
+      <div class="metric">
+        <span>Weight</span>
+        <strong>{{ latest_hume.weight_kg }} kg</strong>
+      </div>
 
-  <tr>
-    <td>Lean Body Mass Index (LBMI)</td>
-    <td>{{ lbmi | round(2) if lbmi is not none else "—" }}</td>
-    <td>
-      {% if delta_lbmi is not none %}
-        <span class="{{ 'good' if delta_lbmi >= 0 else 'bad' }}">{{ delta_lbmi | round(2) }}</span>
-        {% if delta_lbmi > 0 %} boven{% else %} onder{% endif %}
-      {% else %}—{% endif %}
-    </td>
-  </tr>
-</table>
+      <div class="metric">
+        <span>Body fat</span>
+        <strong>{{ latest_hume.body_fat_pct }} %</strong>
+      </div>
+
+      <div class="metric">
+        <span>Lean mass</span>
+        <strong>{{ latest_hume.lean_mass_kg }} kg</strong>
+      </div>
+
+      <div class="metric">
+        <span>LBMI</span>
+        <strong>{{ lbmi | round(2) }}</strong>
+      </div>
+
+      <div class="metric">
+        <span>Δ weight</span>
+        <strong>{{ delta_weight | round(1) }}</strong>
+      </div>
+
+      <div class="metric">
+        <span>Δ body fat</span>
+        <strong>{{ delta_bf | round(1) }}</strong>
+      </div>
+
+      <div class="metric">
+        <span>Δ lean</span>
+        <strong>{{ delta_lean | round(1) }}</strong>
+      </div>
+
+      <div class="metric">
+        <span>Δ LBMI</span>
+        <strong>{{ delta_lbmi | round(2) }}</strong>
+      </div>
+
+    </div>
+
+    {% else %}
+
+    <div class="muted">
+      No Hume measurements yet
+    </div>
+
+    {% endif %}
+
+  </div>
+</div>
 
 <div class="status-strip">
   <div class="status-strip__item">

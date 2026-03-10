@@ -23,7 +23,7 @@
   --shadow: 0 10px 25px rgba(2,6,23,.08);
 
   /* bars (slightly darker than before) */
-  --bar: #fff4dc;            /* sidebar/topbar */
+  --bar: #cce0f1;            /* sidebar/topbar */
   --bar-2: #d6e2f3;          /* hover */
   --brand: #3b82f6;
 
@@ -827,4 +827,27 @@ html[data-theme="dark"] .dial{
   .status-strip{
     grid-template-columns:1fr;
   }
+}
+
+.hume-grid{
+  display:grid;
+  grid-template-columns:repeat(4, 1fr);
+  gap:1rem;
+}
+
+.metric{
+  background:var(--panel-2);
+  border:1px solid var(--border);
+  border-radius:.75rem;
+  padding:.6rem .8rem;
+}
+
+.metric span{
+  display:block;
+  font-size:.8rem;
+  color:var(--muted);
+}
+
+.metric strong{
+  font-size:1.1rem;
 }
