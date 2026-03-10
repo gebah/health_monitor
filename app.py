@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, redirect, current_app, url_for, flash
 from datetime import date, datetime, timedelta
 from collector import sync_garmin, sync_strava, sync_all
+from models import  avg_ignore_none, get_daily_metrics_history
 
 import sqlite3
 import json
@@ -28,6 +29,7 @@ def ensure_cache_table(conn):
             updated_at TEXT NOT NULL
         )
     """)
+
 
 def cache_set(conn, key, obj):
     ensure_cache_table(conn)
@@ -230,6 +232,242 @@ def readiness_score(
         "icon": icon,
         "state": state,
     }
+
+def clamp(value, low=0, high=100):
+    return max(low, min(high, value))
+
+
+def avg_ignore_none(values):
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+def clamp(value, low=0, high=100):
+    return max(low, min(high, value))
+
+
+def avg_ignore_none(values):
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+
+def calculate_recovery_gauge(
+    latest_hrv=None,
+    baseline_hrv=None,
+    sleep_score=None,
+    avg_stress=None,
+    body_battery_high=None,
+    resting_hr=None,
+    baseline_rhr=None,
+    tcl_status=None,
+    manual_penalty=0,
+):
+    # Component scores
+    hrv_score = None
+    hrv_ratio = None
+    if latest_hrv is not None and baseline_hrv not in (None, 0):
+        hrv_ratio = latest_hrv / baseline_hrv
+        if hrv_ratio >= 1.05:
+            hrv_score = 100
+        elif hrv_ratio >= 1.00:
+            hrv_score = 95
+        elif hrv_ratio >= 0.95:
+            hrv_score = 80
+        elif hrv_ratio >= 0.90:
+            hrv_score = 60
+        elif hrv_ratio >= 0.85:
+            hrv_score = 40
+        else:
+            hrv_score = 20
+    elif latest_hrv is not None:
+        # fallback zonder baseline
+        if latest_hrv >= 80:
+            hrv_score = 95
+        elif latest_hrv >= 70:
+            hrv_score = 80
+        elif latest_hrv >= 60:
+            hrv_score = 65
+        elif latest_hrv >= 50:
+            hrv_score = 45
+        else:
+            hrv_score = 25
+
+    sleep_score_val = None
+    if sleep_score is not None:
+        sleep_score_val = clamp(round(sleep_score))
+
+    stress_score = None
+    if avg_stress is not None:
+        if avg_stress <= 15:
+            stress_score = 95
+        elif avg_stress <= 20:
+            stress_score = 85
+        elif avg_stress <= 25:
+            stress_score = 70
+        elif avg_stress <= 30:
+            stress_score = 55
+        elif avg_stress <= 35:
+            stress_score = 40
+        else:
+            stress_score = 25
+
+    bb_score = None
+    if body_battery_high is not None:
+        if body_battery_high >= 90:
+            bb_score = 100
+        elif body_battery_high >= 80:
+            bb_score = 90
+        elif body_battery_high >= 70:
+            bb_score = 75
+        elif body_battery_high >= 60:
+            bb_score = 60
+        elif body_battery_high >= 50:
+            bb_score = 45
+        else:
+            bb_score = 30
+
+    rhr_score = None
+    rhr_delta = None
+    if resting_hr is not None and baseline_rhr is not None:
+        rhr_delta = resting_hr - baseline_rhr
+        if rhr_delta <= 0:
+            rhr_score = 95
+        elif rhr_delta <= 2:
+            rhr_score = 80
+        elif rhr_delta <= 4:
+            rhr_score = 65
+        elif rhr_delta <= 6:
+            rhr_score = 45
+        else:
+            rhr_score = 25
+    elif resting_hr is not None:
+        if resting_hr <= 50:
+            rhr_score = 90
+        elif resting_hr <= 55:
+            rhr_score = 75
+        elif resting_hr <= 60:
+            rhr_score = 60
+        elif resting_hr <= 65:
+            rhr_score = 45
+        else:
+            rhr_score = 30
+
+    tcl_score = 60
+    tcl_state = str(tcl_status).strip().lower() if tcl_status else ""
+    if tcl_state:
+        if "fresh" in tcl_state:
+            tcl_score = 95
+        elif "balanced" in tcl_state or "productive" in tcl_state:
+            tcl_score = 85
+        elif "loaded" in tcl_state:
+            tcl_score = 60
+        elif "fatigued" in tcl_state or "vermoeid" in tcl_state:
+            tcl_score = 35
+        elif "very" in tcl_state or "zeer" in tcl_state:
+            tcl_score = 20
+
+    parts = [
+        (hrv_score, 0.35),
+        (sleep_score_val, 0.20),
+        (stress_score, 0.20),
+        (bb_score, 0.10),
+        (rhr_score, 0.10),
+        (tcl_score, 0.05),
+    ]
+
+    valid = [(v, w) for v, w in parts if v is not None]
+    if valid:
+        total_w = sum(w for _, w in valid)
+        score = round(sum(v * w for v, w in valid) / total_w)
+    else:
+        score = None
+
+    reasons = []
+
+    if score is not None and manual_penalty:
+        score = max(0, score - manual_penalty)
+        reasons.append(f"Handmatige herstelpenalty: -{manual_penalty}")
+
+    # Strengere caps
+    if score is not None:
+    # Handmatige penalty / herstelstatus => nooit train
+        if manual_penalty and manual_penalty >= 10:
+            score = min(score, 59)
+            reasons.append("Herstelmodus actief")
+
+        # Lage HRV component => max walk
+        if hrv_score is not None and hrv_score <= 45:
+            score = min(score, 49)
+            reasons.append("HRV laag")
+
+        # Vermoeid op TCL => max walk
+        if tcl_state and ("fatigued" in tcl_state or "vermoeid" in tcl_state):
+            score = min(score, 49)
+            reasons.append("TCL vermoeid")
+
+        # Zeer vermoeid => rest
+        if tcl_state and (("very" in tcl_state and "fatigued" in tcl_state) or ("zeer" in tcl_state and "vermoeid" in tcl_state)):
+            score = min(score, 35)
+            reasons.append("TCL zeer vermoeid")
+
+        # HRV ratio onder baseline
+        if hrv_ratio is not None and hrv_ratio < 0.95:
+            score = min(score, 49)
+            reasons.append("HRV onder 95% van baseline")
+
+        if hrv_ratio is not None and hrv_ratio < 0.90:
+            score = min(score, 39)
+            reasons.append("HRV onder 90% van baseline")
+
+        # Verhoogde rusthartslag
+        if rhr_delta is not None and rhr_delta >= 5:
+            score = min(score, 49)
+            reasons.append("Rusthartslag verhoogd")
+
+        # Slechte slaap
+        if sleep_score is not None and sleep_score < 65:
+            score = min(score, 59)
+            reasons.append("Slaapscore laag")
+
+        # Hoge stress
+        if avg_stress is not None and avg_stress > 30:
+            score = min(score, 49)
+            reasons.append("Stress verhoogd")
+
+    if score is None:
+        state = "unknown"
+        label = "Unknown"
+    elif score >= 75:
+        state = "train"
+        label = "Train"
+    elif score >= 60:
+        state = "easy"
+        label = "Easy"
+    elif score >= 40:
+        state = "walk"
+        label = "Walk"
+    else:
+        state = "rest"
+        label = "Rest"
+
+    return {
+        "score": score,
+        "state": state,
+        "label": label,
+        "reasons": reasons,
+        "components": {
+            "hrv": hrv_score,
+            "sleep": sleep_score_val,
+            "stress": stress_score,
+            "body_battery": bb_score,
+            "resting_hr": rhr_score,
+            "tcl": tcl_score,
+        }
+    }
+
 
 @app.context_processor
 def inject_globals():
@@ -483,7 +721,28 @@ def home():
             flags=flags
         )
 
-        # header cache (als je dit al hebt: laten)
+        latest_hume = conn.execute(
+            "SELECT * FROM hume_body ORDER BY day DESC LIMIT 1"
+        ).fetchone()
+        latest_hume = dict(latest_hume) if latest_hume else None
+
+        history = get_daily_metrics_history(days=28)
+
+        baseline_hrv = avg_ignore_none([d.get("hrv") for d in history[1:]]) if history else None
+        baseline_rhr = avg_ignore_none([d.get("resting_hr") for d in history[1:]]) if history else None
+
+        recovery = calculate_recovery_gauge(
+            latest_hrv=latest.get("hrv"),
+            baseline_hrv=baseline_hrv,
+            sleep_score=latest.get("sleep_score"),
+            avg_stress=latest.get("avg_stress"),
+            body_battery_high=latest.get("body_battery_high"),
+            resting_hr=latest.get("resting_hr"),
+            baseline_rhr=baseline_rhr,
+            tcl_status=latest.get("tcl_status"),
+            manual_penalty=15,
+        )
+
         cache_set(conn, "readiness_header", {
             "score": readiness.get("score"),
             "label": readiness.get("label"),
@@ -493,20 +752,42 @@ def home():
             "why": readiness.get("why"),
         })
 
-        latest_hume = conn.execute("SELECT * FROM hume_body ORDER BY day DESC LIMIT 1").fetchone()
-        latest_hume = dict(latest_hume) if latest_hume else None
-
     delta_weight = delta_lean = delta_bf = lbmi = delta_lbmi = None
     if latest_hume:
         w = latest_hume.get("weight_kg")
         lean = latest_hume.get("lean_mass_kg")
         bf = latest_hume.get("body_fat_pct")
-        if w is not None: delta_weight = w - 90
-        if bf is not None: delta_bf = bf - 17.5
+        if w is not None:
+            delta_weight = w - 90
+        if bf is not None:
+            delta_bf = bf - 17.5
         if lean is not None:
             delta_lean = lean - 70
             lbmi = lean / (USER_HEIGHT ** 2)
             delta_lbmi = lbmi - (70 / (USER_HEIGHT ** 2))
+
+    home_status = {
+        "recovery": {
+            "label": recovery.get("label", "-"),
+            "state": recovery.get("state", "unknown"),
+            "score": recovery.get("score"),
+        },
+        "readiness": {
+            "label": readiness.get("label", "-"),
+            "state": readiness.get("state", "unknown"),
+            "score": readiness.get("score"),
+        },
+        "load": {
+            "label": latest.get("tcl_status") or "-",
+            "state": (
+                "rest" if str(latest.get("tcl_status", "")).lower() in {"fatigued", "vermoeid", "very_fatigued", "zeer_vermoeid"}
+                else "easy" if str(latest.get("tcl_status", "")).lower() in {"loaded"}
+                else "train" if str(latest.get("tcl_status", "")).lower() in {"fresh", "balanced", "productive"}
+                else "unknown"
+            ),
+            "score": latest.get("tcl"),
+        }
+    }
 
     return render_template(
         "home.html",
@@ -523,6 +804,8 @@ def home():
         delta_bf=delta_bf,
         lbmi=lbmi,
         delta_lbmi=delta_lbmi,
+        recovery=recovery,
+        home_status=home_status
     )
 
 @app.route("/hume/charts")

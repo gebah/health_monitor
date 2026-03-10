@@ -66,6 +66,32 @@ data-weekly-kcal-target="17500"
   </tr>
 </table>
 
+<div class="status-strip">
+  <div class="status-strip__item">
+    <div class="status-strip__label">Recovery</div>
+    <div class="status-strip__value">
+      <span class="badge badge--{{ home_status.recovery.state }}">{{ home_status.recovery.label }}</span>
+      <strong>{{ home_status.recovery.score if home_status.recovery.score is not none else "-" }}</strong>
+    </div>
+  </div>
+
+  <div class="status-strip__item">
+    <div class="status-strip__label">Readiness</div>
+    <div class="status-strip__value">
+      <span class="badge badge--{{ home_status.readiness.state }}">{{ home_status.readiness.label }}</span>
+      <strong>{{ home_status.readiness.score if home_status.readiness.score is not none else "-" }}</strong>
+    </div>
+  </div>
+
+  <div class="status-strip__item">
+    <div class="status-strip__label">Load</div>
+    <div class="status-strip__value">
+      <span class="badge badge--{{ home_status.load.state }}">{{ home_status.load.label }}</span>
+      <strong>{{ home_status.load.score if home_status.load.score is not none else "-" }}</strong>
+    </div>
+  </div>
+</div>
+
 <h2>Training readiness</h2>
 {% if readiness %}
   {% set rs = readiness.score %}
@@ -137,6 +163,42 @@ data-weekly-kcal-target="17500"
 {% else %}
   <div class="card">Nog geen readiness beschikbaar.</div>
 {% endif %}
+
+<div class="card">
+  <div class="card__header">
+    <h3>Recovery Gauge</h3>
+    <span class="badge badge--{{ recovery.state }}">{{ recovery.label }}</span>
+  </div>
+
+  <div class="card__body">
+    <div class="recovery-card-layout">
+      <div
+        class="recovery-gauge recovery-gauge--{{ recovery.state }}"
+        style="--value: {{ recovery.score or 0 }};"
+      >
+        <svg viewBox="0 0 120 120" class="recovery-gauge__svg" aria-hidden="true">
+          <circle class="recovery-gauge__track" cx="60" cy="60" r="46"></circle>
+          <circle class="recovery-gauge__progress" cx="60" cy="60" r="46"></circle>
+        </svg>
+
+        <div class="recovery-gauge__center">
+          <div class="recovery-gauge__score">{{ recovery.score if recovery.score is not none else "-" }}</div>
+          <div class="recovery-gauge__label">{{ recovery.label }}</div>
+        </div>
+      </div>
+
+      <div class="recovery-details">
+        <div class="recovery-meta">
+          {% if recovery.reasons %}
+            {{ recovery.reasons | join(', ') }}
+          {% else %}
+            Herstelstatus op basis van HRV, slaap, stress en TCL
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <h2>Latest daily metrics</h2>
 {% if latest %}

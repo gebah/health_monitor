@@ -11,7 +11,15 @@ def get_latest_daily_metrics():
     """).fetchone()
     return row_to_dict(row) or {}
 
-def get_daily_metrics_history(days: int = 30):
+
+def avg_ignore_none(values):
+    vals = [v for v in values if v not in (None, "")]
+    if not vals:
+        return None
+    return round(sum(vals) / len(vals), 2)
+
+
+def get_daily_metrics_history(days: int = 28):
     conn = get_conn()
     rows = conn.execute("""
         SELECT *
