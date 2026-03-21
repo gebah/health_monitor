@@ -107,7 +107,66 @@ data-weekly-kcal-target="17500"
 </div>
 
 <h2>Training readiness</h2>
-{% if readiness %}
+{% if strava_readiness %}
+  {% set rs = strava_readiness.readiness_score %}
+  {% set tone = "good" if rs >= 75 else ("ok" if rs >= 50 else "bad") %}
+
+  <div class="readiness card">
+    <div class="readiness__top">
+      <div class="dial dial--{{ tone }}" style="--p: {{ rs }};">
+        <div class="dial__inner">
+          <div class="dial__value">{{ rs }}</div>
+          <div class="dial__label">{{ strava_readiness.label }}</div>
+        </div>
+      </div>
+
+      <div class="readiness__summary">
+        <div class="readiness__title">Today</div>
+
+        <div class="readiness__advice {{ tone }}">
+          <div style="font-weight:700; margin-bottom:2px;">
+            Load-based readiness
+          </div>
+
+          <div>
+            {{ strava_readiness.label }} · {{ strava_readiness.form_label }}
+          </div>
+
+          <div class="muted" style="margin-top:6px; font-size:12px;">
+            Gebaseerd op Strava TCL, fitness, fatigue en form.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="readiness__bars">
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">Recovery gauge</div><div class="bar__val">{{ strava_readiness.recovery_gauge }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ strava_readiness.recovery_gauge }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">Fitness</div><div class="bar__val">{{ strava_readiness.fitness }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ [strava_readiness.fitness, 100] | min }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">Fatigue</div><div class="bar__val">{{ strava_readiness.fatigue }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ [strava_readiness.fatigue, 100] | min }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">Form</div><div class="bar__val">{{ strava_readiness.form }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ [strava_readiness.recovery_gauge, 100] | min }};"></div></div>
+      </div>
+
+      <div class="bar">
+        <div class="bar__row"><div class="bar__name">Daily load</div><div class="bar__val">{{ strava_readiness.daily_load }}</div></div>
+        <div class="bar__track"><div class="bar__fill" style="--p: {{ [strava_readiness.daily_load, 100] | min }};"></div></div>
+      </div>
+    </div>
+  </div>
+{% elif readiness %}
   {% set rs = readiness.score %}
   {% set tone = "good" if rs >= 75 else ("ok" if rs >= 50 else "bad") %}
 
@@ -136,7 +195,6 @@ data-weekly-kcal-target="17500"
             </div>
           {% endif %}
         </div>
-
       </div>
     </div>
 
@@ -178,17 +236,20 @@ data-weekly-kcal-target="17500"
   <div class="card">Nog geen readiness beschikbaar.</div>
 {% endif %}
 
+
 <div class="card">
   <div class="card__header">
     <h3>Recovery Gauge</h3>
-    <span class="badge badge--{{ recovery.state }}">{{ recovery.label }}</span>
+    <span class="badge badge--{{ strava_readiness.state if strava_readiness else recovery.state }}">
+      {{ strava_readiness.form_label if strava_readiness else recovery.label }}
+    </span>
   </div>
 
   <div class="card__body">
     <div class="recovery-card-layout">
       <div
-        class="recovery-gauge recovery-gauge--{{ recovery.state }}"
-        style="--value: {{ recovery.score or 0 }};"
+        class="recovery-gauge recovery-gauge--{{ strava_readiness.state if strava_readiness else recovery.state }}"
+        style="--value: {{ strava_readiness.recovery_gauge if strava_readiness else (recovery.score or 0) }};"
       >
         <svg viewBox="0 0 120 120" class="recovery-gauge__svg" aria-hidden="true">
           <circle class="recovery-gauge__track" cx="60" cy="60" r="46"></circle>
@@ -196,14 +257,20 @@ data-weekly-kcal-target="17500"
         </svg>
 
         <div class="recovery-gauge__center">
-          <div class="recovery-gauge__score">{{ recovery.score if recovery.score is not none else "-" }}</div>
-          <div class="recovery-gauge__label">{{ recovery.label }}</div>
+          <div class="recovery-gauge__score">
+            {{ strava_readiness.recovery_gauge if strava_readiness else (recovery.score if recovery.score is not none else "-") }}
+          </div>
+          <div class="recovery-gauge__label">
+            {{ strava_readiness.form_label if strava_readiness else recovery.label }}
+          </div>
         </div>
       </div>
 
       <div class="recovery-details">
         <div class="recovery-meta">
-          {% if recovery.reasons %}
+          {% if strava_readiness %}
+            Form {{ strava_readiness.form }}, fitness {{ strava_readiness.fitness }}, fatigue {{ strava_readiness.fatigue }}.
+          {% elif recovery.reasons %}
             {{ recovery.reasons | join(', ') }}
           {% else %}
             Herstelstatus op basis van HRV, slaap, stress en TCL
@@ -213,6 +280,43 @@ data-weekly-kcal-target="17500"
     </div>
   </div>
 </div>
+
+<div class="card">
+  <div class="card__header">
+    <h3>Trainingsadvies</h3>
+    <span class="badge badge--{{ training_advice.tone }}">{{ training_advice.label }}</span>
+  </div>
+
+  <div class="card__body">
+    <div class="recovery-card-layout">
+      <div
+        class="recovery-gauge recovery-gauge--{{ training_advice.code }}"
+        style="--value: {{ advice_score }};"
+      >
+        <svg viewBox="0 0 120 120" class="recovery-gauge__svg" aria-hidden="true">
+          <circle class="recovery-gauge__track" cx="60" cy="60" r="46"></circle>
+          <circle class="recovery-gauge__progress" cx="60" cy="60" r="46"></circle>
+        </svg>
+
+        <div class="recovery-gauge__center">
+          <div class="recovery-gauge__score">{{ advice_score }}</div>
+          <div class="recovery-gauge__label">{{ training_advice.label }}</div>
+        </div>
+      </div>
+
+      <div class="recovery-details">
+        <div class="recovery-meta" style="font-size:16px; color:var(--text); margin-bottom:10px;">
+          {{ training_advice.summary }}
+        </div>
+
+        <div class="recovery-meta">
+          {{ training_advice.details }}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 
 <h2>Latest daily metrics</h2>
 {% if latest %}

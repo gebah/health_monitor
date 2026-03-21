@@ -370,3 +370,53 @@ def compute_strava_readiness_today(
 ) -> dict | None:
     series = compute_strava_readiness_series(daily_loads)
     return series[-1] if series else None
+
+def get_training_advice(readiness_score, tsb, recovery_score=None):
+    readiness_score = float(readiness_score or 0)
+    tsb = float(tsb or 0)
+    recovery_score = None if recovery_score is None else float(recovery_score)
+
+    # extra veiligheidsrem
+    if recovery_score is not None and recovery_score < 40:
+        return {
+            "code": "rest",
+            "label": "Rust",
+            "summary": "Herstel is te laag voor zinvolle trainingsprikkel.",
+            "details": "Kies rust of hooguit wandelen/mobiliteit.",
+            "tone": "bad",
+        }
+
+    if readiness_score >= 75 and tsb >= 5:
+        return {
+            "code": "train_hard",
+            "label": "Hard trainen",
+            "summary": "Je bent fris genoeg voor een intensieve sessie.",
+            "details": "Geschikt voor intervallen, FTP/blokken of zware krachttraining.",
+            "tone": "good",
+        }
+
+    if readiness_score >= 60 and tsb >= -10:
+        return {
+            "code": "train_easy",
+            "label": "Normaal trainen",
+            "summary": "Je kunt trainen, maar niet maximaal forceren.",
+            "details": "Goede dag voor tempo, duur of gecontroleerde kracht.",
+            "tone": "ok",
+        }
+
+    if readiness_score >= 45 and tsb >= -20:
+        return {
+            "code": "recovery",
+            "label": "Licht herstellen",
+            "summary": "Belasting is mogelijk, maar hou het rustig.",
+            "details": "Kies zone 1/2, korte techniekprikkel of wandelen.",
+            "tone": "ok",
+        }
+
+    return {
+        "code": "rest",
+        "label": "Rust",
+        "summary": "Je systeem vraagt om herstel.",
+        "details": "Vandaag liever rust, mobiliteit of een heel rustige activiteit.",
+        "tone": "bad",
+    }

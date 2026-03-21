@@ -851,3 +851,120 @@ html[data-theme="dark"] .dial{
 .metric strong{
   font-size:1.1rem;
 }
+
+.advice-card{
+  position:relative;
+  overflow:hidden;
+}
+
+.advice-card::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+  width:5px;
+  border-radius:12px 0 0 12px;
+  background:var(--border);
+}
+
+.advice-card--good::before{
+  background:var(--good);
+}
+
+.advice-card--ok::before{
+  background:var(--ok);
+}
+
+.advice-card--bad::before{
+  background:var(--bad);
+}
+
+.advice-card .card__body{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.advice-card__summary{
+  font-size:1.35rem;
+  font-weight:700;
+  line-height:1.25;
+  color:var(--text);
+}
+
+.advice-card__details{
+  font-size:1rem;
+  color:var(--muted);
+  line-height:1.5;
+}
+
+.advice-card__meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-top:4px;
+  font-size:.9rem;
+  color:var(--muted);
+}
+
+.advice-card__meta span{
+  padding:6px 10px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  background:var(--panel-2);
+}
+
+.badge--good{
+  background:rgba(34,197,94,.14);
+  color:var(--good);
+}
+
+.badge--ok{
+  background:rgba(245,158,11,.14);
+  color:var(--ok);
+}
+
+.badge--bad{
+  background:rgba(239,68,68,.14);
+  color:var(--bad);
+}
+
+.readiness-meta{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px 14px;
+  margin-top:6px;
+  font-size:.95rem;
+  color:var(--muted);
+}
+
+.readiness-meta > div{
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--panel-2);
+}
+
+@media (max-width: 700px){
+  .readiness-meta{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+
+.gauge.good { --brand: var(--good); }
+.gauge.ok { --brand: var(--ok); }
+.gauge.bad { --brand: var(--bad); }
+
+.recovery-gauge--train .recovery-gauge__progress{
+  stroke: var(--good);
+}
+
+.recovery-gauge--easy .recovery-gauge__progress,
+.recovery-gauge--recovery .recovery-gauge__progress{
+  stroke: var(--ok);
+}
+
+.recovery-gauge--rest .recovery-gauge__progress{
+  stroke: var(--bad);
+}

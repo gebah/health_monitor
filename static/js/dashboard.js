@@ -566,6 +566,12 @@ async function loadFormMetric() {
   advEl.textContent = trainingAdvice({ tsb, readinessScore: r });
 }
 
+document.querySelectorAll(".gauge").forEach(g => {
+  const val = Number(g.dataset.value || 0);
+  const deg = (val / 100) * 360;
+
+  g.style.background = `conic-gradient(var(--brand) ${deg}deg, #e5e7eb ${deg}deg)`;
+});
 
 // --------------------
 // Boot

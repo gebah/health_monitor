@@ -699,13 +699,171 @@ def import_fitatu_meal_csv(conn, file_storage) -> dict:
         "upserts": upserts,
     }
 
+def get_latest_strava_readiness(conn):
+    row = conn.execute("""
+        SELECT
+            day,
+            daily_load,
+            fatigue,
+            fitness,
+            form,
+            readiness_score,
+            recovery_gauge,
+            source
+        FROM readiness_daily
+        ORDER BY day DESC
+        LIMIT 1
+    """).fetchone()
+
+    if not row:
+        return None
+
+    row = dict(row)
+
+    readiness_score_val = int(row.get("readiness_score") or 0)
+    recovery_gauge_val = int(row.get("recovery_gauge") or 0)
+    form_val = float(row.get("form") or 0)
+
+    if readiness_score_val >= 80:
+        label = "Zeer goed"
+        state = "train"
+    elif readiness_score_val >= 65:
+        label = "Goed"
+        state = "easy"
+    elif readiness_score_val >= 50:
+        label = "Redelijk"
+        state = "easy"
+    elif readiness_score_val >= 35:
+        label = "Vermoeid"
+        state = "walk"
+    else:
+        label = "Laag"
+        state = "rest"
+
+    if form_val >= 10:
+        form_label = "Fris"
+    elif form_val >= 0:
+        form_label = "In balans"
+    elif form_val >= -10:
+        form_label = "Belast"
+    else:
+        form_label = "Vermoeid"
+
+    row["label"] = label
+    row["state"] = state
+    row["form_label"] = form_label
+    row["readiness_score"] = readiness_score_val
+    row["recovery_gauge"] = recovery_gauge_val
+    row["form"] = round(form_val, 1)
+    row["fitness"] = round(float(row.get("fitness") or 0), 1)
+    row["fatigue"] = round(float(row.get("fatigue") or 0), 1)
+    row["daily_load"] = round(float(row.get("daily_load") or 0), 1)
+
+    return row
+
+def get_training_advice(readiness_score, tsb, recovery_score=None):
+    readiness_score = float(readiness_score or 0)
+    tsb = float(tsb or 0)
+    recovery_score = None if recovery_score is None else float(recovery_score)
+
+    if recovery_score is not None and recovery_score < 40:
+        return {
+            "code": "rest",
+            "label": "Rust",
+            "summary": "Herstel is te laag voor zinvolle trainingsprikkel.",
+            "details": "Kies rust of hooguit wandelen/mobiliteit.",
+            "tone": "bad",
+        }
+
+    if readiness_score >= 75 and tsb >= 5:
+        return {
+            "code": "train_hard",
+            "label": "Hard trainen",
+            "summary": "Je bent fris genoeg voor een intensieve sessie.",
+            "details": "Geschikt voor intervallen of zware training.",
+            "tone": "good",
+        }
+
+    if readiness_score >= 60 and tsb >= -10:
+        return {
+            "code": "train_easy",
+            "label": "Normaal trainen",
+            "summary": "Goede dag voor een degelijke training.",
+            "details": "Tempo, duur of gecontroleerde belasting.",
+            "tone": "ok",
+        }
+
+    if readiness_score >= 45 and tsb >= -20:
+        return {
+            "code": "recovery",
+            "label": "Licht herstellen",
+            "summary": "Hou het rustig vandaag.",
+            "details": "Zone 1/2 of hersteltraining.",
+            "tone": "ok",
+        }
+
+    return {
+        "code": "rest",
+        "label": "Rust",
+        "summary": "Je systeem vraagt om herstel.",
+        "details": "Neem rust of doe mobiliteit.",
+        "tone": "bad",
+    }
+
+def tsb_to_score(tsb):
+    tsb = max(-30, min(30, float(tsb or 0)))
+    return int((tsb + 30) / 60 * 100)
+
+def tsb_to_score(tsb):
+    tsb = max(-30, min(30, float(tsb or 0)))
+    return int((tsb + 30) / 60 * 100)
+
+
+# def get_training_advice(tsb, score):
+#     tsb = float(tsb or 0)
+
+#     if tsb <= -25:
+#         return {
+#             "label": "Rust",
+#             "code": "rest",
+#             "summary": "Je systeem vraagt om herstel.",
+#             "details": "Neem rust of doe mobiliteit / wandelen.",
+#             "tone": "bad",
+#         }
+#     if tsb <= -10:
+#         return {
+#             "label": "Herstel",
+#             "code": "recovery",
+#             "summary": "Houd het licht vandaag.",
+#             "details": "Kies zone 1/2 of een korte rustige sessie.",
+#             "tone": "ok",
+#         }
+#     if tsb < 5:
+#         return {
+#             "label": "Normaal",
+#             "code": "easy",
+#             "summary": "Goede dag voor normale training.",
+#             "details": "Prima voor duur, tempo of gecontroleerde kracht.",
+#             "tone": "ok",
+#         }
+
+#     return {
+#         "label": "Klaar om te knallen",
+#         "code": "train",
+#         "summary": "Je bent fris genoeg voor een stevige prikkel.",
+#         "details": "Geschikt voor intervallen of een zwaardere sessie.",
+#         "tone": "good",
+#     }
+    
 @app.route("/")
 def home():
     days = int(request.args.get("days", 30))
 
     with get_conn() as conn:
-        latest = conn.execute("SELECT * FROM daily_metrics ORDER BY day DESC LIMIT 1").fetchone()
-        latest = row_to_dict(latest)
+        latest_row = conn.execute(
+            "SELECT * FROM daily_metrics ORDER BY day DESC LIMIT 1"
+        ).fetchone()
+        latest = row_to_dict(latest_row)
 
         tcl_7d = get_tcl_7d(conn)
         tl = get_training_load_today(conn)
@@ -721,10 +879,10 @@ def home():
             flags=flags
         )
 
-        latest_hume = conn.execute(
+        latest_hume_row = conn.execute(
             "SELECT * FROM hume_body ORDER BY day DESC LIMIT 1"
         ).fetchone()
-        latest_hume = dict(latest_hume) if latest_hume else None
+        latest_hume = dict(latest_hume_row) if latest_hume_row else None
 
         history = get_daily_metrics_history(days=28)
 
@@ -732,16 +890,34 @@ def home():
         baseline_rhr = avg_ignore_none([d.get("resting_hr") for d in history[1:]]) if history else None
 
         recovery = calculate_recovery_gauge(
-            latest_hrv=latest.get("hrv"),
+            latest_hrv=latest.get("hrv") if latest else None,
             baseline_hrv=baseline_hrv,
-            sleep_score=latest.get("sleep_score"),
-            avg_stress=latest.get("avg_stress"),
-            body_battery_high=latest.get("body_battery_high"),
-            resting_hr=latest.get("resting_hr"),
+            sleep_score=latest.get("sleep_score") if latest else None,
+            avg_stress=latest.get("avg_stress") if latest else None,
+            body_battery_high=latest.get("body_battery_high") if latest else None,
+            resting_hr=latest.get("resting_hr") if latest else None,
             baseline_rhr=baseline_rhr,
-            tcl_status=latest.get("tcl_status"),
-            manual_penalty=15,
+            tcl_status=latest.get("tcl_status") if latest else None,
         )
+
+        strava_readiness = get_latest_strava_readiness(conn)
+
+        # Trainingsadvies op basis van readiness + form/TSB + recovery
+        tsb_val = strava_readiness.get("form") if strava_readiness else tl.get("tsb")
+        advice_score = tsb_to_score(tsb_val)
+
+        training_advice = get_training_advice(
+            readiness_score=(
+                strava_readiness.get("readiness_score")
+                if strava_readiness else readiness.get("score")
+            ),
+            tsb=tsb_val,
+            recovery_score=(
+                strava_readiness.get("recovery_gauge")
+                if strava_readiness else recovery.get("score")
+            ),
+        )
+        training_advice["score"] = advice_score
 
         cache_set(conn, "readiness_header", {
             "score": readiness.get("score"),
@@ -757,6 +933,7 @@ def home():
         w = latest_hume.get("weight_kg")
         lean = latest_hume.get("lean_mass_kg")
         bf = latest_hume.get("body_fat_pct")
+
         if w is not None:
             delta_weight = w - 90
         if bf is not None:
@@ -766,26 +943,65 @@ def home():
             lbmi = lean / (USER_HEIGHT ** 2)
             delta_lbmi = lbmi - (70 / (USER_HEIGHT ** 2))
 
+    load_label = (
+        f"{strava_readiness.get('daily_load'):.0f} TCL"
+        if strava_readiness
+        else ((latest.get("tcl_status") or "-") if latest else "-")
+    )
+
+    load_state = (
+        strava_readiness.get("state")
+        if strava_readiness else
+        "rest" if str((latest or {}).get("tcl_status", "")).lower() in {"fatigued", "vermoeid", "very_fatigued", "zeer_vermoeid"}
+        else "easy" if str((latest or {}).get("tcl_status", "")).lower() in {"loaded"}
+        else "train" if str((latest or {}).get("tcl_status", "")).lower() in {"fresh", "balanced", "productive"}
+        else "unknown"
+    )
+
+    load_score = (
+        strava_readiness.get("daily_load")
+        if strava_readiness
+        else (latest.get("tcl") if latest else None)
+    )
+
     home_status = {
         "recovery": {
-            "label": recovery.get("label", "-"),
-            "state": recovery.get("state", "unknown"),
-            "score": recovery.get("score"),
+            "label": (
+                strava_readiness.get("form_label")
+                if strava_readiness else recovery.get("label", "-")
+            ),
+            "state": (
+                strava_readiness.get("state")
+                if strava_readiness else recovery.get("state", "unknown")
+            ),
+            "score": (
+                strava_readiness.get("recovery_gauge")
+                if strava_readiness else recovery.get("score")
+            ),
         },
         "readiness": {
-            "label": readiness.get("label", "-"),
-            "state": readiness.get("state", "unknown"),
-            "score": readiness.get("score"),
+            "label": (
+                strava_readiness.get("label")
+                if strava_readiness else readiness.get("label", "-")
+            ),
+            "state": (
+                strava_readiness.get("state")
+                if strava_readiness else readiness.get("state", "unknown")
+            ),
+            "score": (
+                strava_readiness.get("readiness_score")
+                if strava_readiness else readiness.get("score")
+            ),
         },
         "load": {
-            "label": latest.get("tcl_status") or "-",
-            "state": (
-                "rest" if str(latest.get("tcl_status", "")).lower() in {"fatigued", "vermoeid", "very_fatigued", "zeer_vermoeid"}
-                else "easy" if str(latest.get("tcl_status", "")).lower() in {"loaded"}
-                else "train" if str(latest.get("tcl_status", "")).lower() in {"fresh", "balanced", "productive"}
-                else "unknown"
-            ),
-            "score": latest.get("tcl"),
+            "label": load_label,
+            "state": load_state,
+            "score": load_score,
+        },
+        "advice": {
+            "label": training_advice["label"],
+            "state": training_advice["code"],
+            "score": training_advice["score"],
         }
     }
 
@@ -796,6 +1012,7 @@ def home():
         latest=latest,
         readiness=readiness,
         readiness_score=readiness["score"],
+        strava_readiness=strava_readiness,
         USER_NAME=USER_NAME,
         USER_HEIGHT=USER_HEIGHT,
         latest_hume=latest_hume,
@@ -805,8 +1022,11 @@ def home():
         lbmi=lbmi,
         delta_lbmi=delta_lbmi,
         recovery=recovery,
-        home_status=home_status
+        home_status=home_status,
+        training_advice=training_advice,
+        advice_score=advice_score,
     )
+
 
 @app.route("/hume/charts")
 def hume_charts():
@@ -1067,22 +1287,17 @@ def api_pro_analysis():
 def _parse_yyyy_mm_dd(s: str) -> date:
     return datetime.strptime(s, "%Y-%m-%d").date()
 
-def _ema_series(days, loads, tau_days: int):
-    """
-    TrainingPeaks-achtige EMA:
-      ema[t] = ema[t-1] + (load[t] - ema[t-1]) * (1/tau)
-    tau=7 (ATL), tau=42 (CTL)
-    """
-    if not days:
+def _ema_series(xs, loads, tau_days=7):
+    if not loads:
         return []
-    k = 1.0 / float(tau_days)
-    ema = []
-    prev = float(loads[0])
-    ema.append(prev)
-    for i in range(1, len(loads)):
-        x = float(loads[i])
-        prev = prev + (x - prev) * k
-        ema.append(prev)
+
+    alpha = 1.0 / float(tau_days)
+    ema = [float(loads[0])]
+
+    for load in loads[1:]:
+        cur = ema[-1] + alpha * (float(load) - ema[-1])
+        ema.append(cur)
+
     return ema
 
 @app.route("/api/training_load")
@@ -1090,11 +1305,10 @@ def api_training_load():
     days = int(request.args.get("days", 30))
     conn = get_conn()
 
-    # Daily TCL from Strava activities (tcl) grouped by date
     rows = conn.execute("""
         SELECT
           date(start_time_local) AS day,
-          COALESCE(SUM(tcl), 0)  AS tcl
+          COALESCE(SUM(tcl), 0) AS tcl
         FROM strava_activities
         WHERE start_time_local IS NOT NULL
         GROUP BY day
@@ -1104,31 +1318,36 @@ def api_training_load():
     if not rows:
         return jsonify([])
 
-    # Build continuous day range (fill missing days with 0)
     min_day = _parse_yyyy_mm_dd(rows[0]["day"])
     max_day = _parse_yyyy_mm_dd(rows[-1]["day"])
 
-    # Limit to last N days
     end_day = max_day
-    start_day = end_day - timedelta(days=days - 1)
+    display_start_day = end_day - timedelta(days=days - 1)
+
+    # extra historie om ATL/CTL stabiel te maken
+    warmup_days = 180
+    calc_start_day = max(min_day, display_start_day - timedelta(days=warmup_days))
 
     tcl_by_day = {r["day"]: float(r["tcl"] or 0) for r in rows}
 
     xs = []
     loads = []
-    d = start_day
+    d = calc_start_day
     while d <= end_day:
         ds = d.isoformat()
         xs.append(ds)
         loads.append(tcl_by_day.get(ds, 0.0))
         d += timedelta(days=1)
 
-    atl = _ema_series(xs, loads, tau_days=7)    # fatigue
-    ctl = _ema_series(xs, loads, tau_days=42)   # fitness
-    tsb = [c - a for c, a in zip(ctl, atl)]     # form
+    atl = _ema_series(xs, loads, tau_days=7)
+    ctl = _ema_series(xs, loads, tau_days=42)
+    tsb = [c - a for c, a in zip(ctl, atl)]
 
     out = []
     for i in range(len(xs)):
+        if xs[i] < display_start_day.isoformat():
+            continue
+
         out.append({
             "day": xs[i],
             "tcl": round(loads[i], 2),
