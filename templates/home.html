@@ -44,27 +44,27 @@ data-weekly-kcal-target="17500"
 
       <div class="metric">
         <span>LBMI</span>
-        <strong>{{ lbmi | round(2) }}</strong>
+        <strong>{{ lbmi_display if lbmi_display is not none else "—" }}</strong>
       </div>
 
       <div class="metric">
         <span>Δ weight</span>
-        <strong>{{ delta_weight | round(1) }}</strong>
+        <strong>{{ delta_weight | round(1) if delta_weight is not none else "-" }}</strong>
       </div>
 
       <div class="metric">
         <span>Δ body fat</span>
-        <strong>{{ delta_bf | round(1) }}</strong>
+        <strong>{{ delta_bf | round(1) if delta_bf is not none else "-" }}</strong>
       </div>
 
       <div class="metric">
         <span>Δ lean</span>
-        <strong>{{ delta_lean | round(1) }}</strong>
+        <strong>{{ delta_lean | round(1) if delta_lean is not none else "-" }}</strong>
       </div>
 
       <div class="metric">
         <span>Δ LBMI</span>
-        <strong>{{ delta_lbmi | round(2) }}</strong>
+        <strong>{{ delta_lbmi_display | round(2) if delta_lbmi_display is not none else "-" }}</strong>
       </div>
 
     </div>

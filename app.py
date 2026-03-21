@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, redirect, current_app, url_for, flash
 from datetime import date, datetime, timedelta
 from collector import sync_garmin, sync_strava, sync_all
-from models import  avg_ignore_none, get_daily_metrics_history
+from models import avg_ignore_none, get_daily_metrics_history, calc_body_deltas
 
 import sqlite3
 import json
@@ -15,6 +15,38 @@ DB = "/home/gba/Documenten/PycharmProjects/health_monitor/garmin.sqlite"
 
 USER_NAME = "Gé"
 USER_HEIGHT = 1.92
+
+def row_to_dict(row):
+    return dict(row) if row else {}
+
+
+def to_float(value, default=None):
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip().replace(",", ".")
+    if s == "":
+        return default
+    try:
+        return float(s)
+    except ValueError:
+        return default
+
+
+def clamp(value, low=0, high=100):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        value = low
+    return max(low, min(high, value))
+
+
+def avg_ignore_none(values):
+    vals = [to_float(v) for v in values if to_float(v) is not None]
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
 
 def get_conn():
     conn = sqlite3.connect(DB)
@@ -55,11 +87,6 @@ def cache_get(conn, key, default=None):
 def row_to_dict(row):
     return dict(row) if row else {}
 
-
-def clamp(v, lo=0, hi=100):
-    return max(lo, min(hi, v))
-
-
 def readiness_score(
     latest,
     *,
@@ -73,10 +100,10 @@ def readiness_score(
     latest = latest or {}
     flags = flags or {"hrv_drop": False, "sleep_low": False, "stress_high": False}
 
-    hrv = latest.get("hrv_rmssd")
-    sleep = latest.get("sleep_score")
-    stress = latest.get("avg_stress")
-    bb = latest.get("body_battery_high")
+    hrv = to_float(latest.get("hrv_rmssd"))
+    sleep = to_float(latest.get("sleep_score"))
+    stress = to_float(latest.get("avg_stress"))
+    bb = to_float(latest.get("body_battery_high"))
 
     hrv_score = clamp((hrv - 20) * 1.5) if hrv is not None else 50
     sleep_score = sleep if sleep is not None else 50
@@ -232,27 +259,6 @@ def readiness_score(
         "icon": icon,
         "state": state,
     }
-
-def clamp(value, low=0, high=100):
-    return max(low, min(high, value))
-
-
-def avg_ignore_none(values):
-    vals = [v for v in values if v is not None]
-    if not vals:
-        return None
-    return sum(vals) / len(vals)
-
-def clamp(value, low=0, high=100):
-    return max(low, min(high, value))
-
-
-def avg_ignore_none(values):
-    vals = [v for v in values if v is not None]
-    if not vals:
-        return None
-    return sum(vals) / len(vals)
-
 
 def calculate_recovery_gauge(
     latest_hrv=None,
@@ -882,27 +888,40 @@ def home():
         latest_hume_row = conn.execute(
             "SELECT * FROM hume_body ORDER BY day DESC LIMIT 1"
         ).fetchone()
-        latest_hume = dict(latest_hume_row) if latest_hume_row else None
+        latest_hume = row_to_dict(latest_hume_row)
 
-        history = get_daily_metrics_history(days=28)
+        # Zorg dat bodywaarden numeriek zijn
+        if latest_hume:
+            for key in [
+                "weight_kg",
+                "body_fat_pct",
+                "muscle_mass_kg",
+                "lean_mass_kg",
+                "visceral_fat_index",
+                "body_water_pct",
+                "body_cell_mass_kg",
+            ]:
+                if key in latest_hume:
+                    latest_hume[key] = to_float(latest_hume.get(key))
 
-        baseline_hrv = avg_ignore_none([d.get("hrv") for d in history[1:]]) if history else None
+        history = get_daily_metrics_history(days=28) or []
+
+        baseline_hrv = avg_ignore_none([d.get("hrv_rmssd") for d in history[1:]]) if history else None
         baseline_rhr = avg_ignore_none([d.get("resting_hr") for d in history[1:]]) if history else None
 
         recovery = calculate_recovery_gauge(
-            latest_hrv=latest.get("hrv") if latest else None,
+            latest_hrv=to_float(latest.get("hrv_rmssd")) if latest else None,
             baseline_hrv=baseline_hrv,
-            sleep_score=latest.get("sleep_score") if latest else None,
-            avg_stress=latest.get("avg_stress") if latest else None,
-            body_battery_high=latest.get("body_battery_high") if latest else None,
-            resting_hr=latest.get("resting_hr") if latest else None,
+            sleep_score=to_float(latest.get("sleep_score")) if latest else None,
+            avg_stress=to_float(latest.get("avg_stress")) if latest else None,
+            body_battery_high=to_float(latest.get("body_battery_high")) if latest else None,
+            resting_hr=to_float(latest.get("resting_hr")) if latest else None,
             baseline_rhr=baseline_rhr,
             tcl_status=latest.get("tcl_status") if latest else None,
         )
 
         strava_readiness = get_latest_strava_readiness(conn)
 
-        # Trainingsadvies op basis van readiness + form/TSB + recovery
         tsb_val = strava_readiness.get("form") if strava_readiness else tl.get("tsb")
         advice_score = tsb_to_score(tsb_val)
 
@@ -928,40 +947,57 @@ def home():
             "why": readiness.get("why"),
         })
 
-    delta_weight = delta_lean = delta_bf = lbmi = delta_lbmi = None
+    # Veilig body block
+    safe_hume = latest_hume or {}
+    
     if latest_hume:
-        w = latest_hume.get("weight_kg")
-        lean = latest_hume.get("lean_mass_kg")
-        bf = latest_hume.get("body_fat_pct")
+        latest_hume = dict(latest_hume)
+        for key in ["weight_kg", "lean_mass_kg", "body_fat_pct"]:
+            value = latest_hume.get(key)
+            if value is not None:
+                try:
+                    latest_hume[key] = float(str(value).replace(",", "."))
+                except (TypeError, ValueError):
+                    latest_hume[key] = None
+              
+    deltas = calc_body_deltas(
+        safe_hume,
+        target_weight=90,
+        target_lean=70,
+        target_bf=17.5,
+        height_m=USER_HEIGHT,
+    )
 
-        if w is not None:
-            delta_weight = w - 90
-        if bf is not None:
-            delta_bf = bf - 17.5
-        if lean is not None:
-            delta_lean = lean - 70
-            lbmi = lean / (USER_HEIGHT ** 2)
-            delta_lbmi = lbmi - (70 / (USER_HEIGHT ** 2))
+    delta_weight = deltas.get("delta_weight")
+    delta_lean = deltas.get("delta_lean")
+    delta_bf = deltas.get("delta_bf")
+    lbmi = deltas.get("lbmi")
+    delta_lbmi = deltas.get("delta_lbmi")
+
+    lbmi_display = round(lbmi, 2) if lbmi is not None else None
+    delta_lbmi_display = round(delta_lbmi, 2) if delta_lbmi is not None else None
 
     load_label = (
         f"{strava_readiness.get('daily_load'):.0f} TCL"
-        if strava_readiness
+        if strava_readiness and strava_readiness.get("daily_load") is not None
         else ((latest.get("tcl_status") or "-") if latest else "-")
     )
+
+    tcl_status = str((latest or {}).get("tcl_status", "")).strip().lower()
 
     load_state = (
         strava_readiness.get("state")
         if strava_readiness else
-        "rest" if str((latest or {}).get("tcl_status", "")).lower() in {"fatigued", "vermoeid", "very_fatigued", "zeer_vermoeid"}
-        else "easy" if str((latest or {}).get("tcl_status", "")).lower() in {"loaded"}
-        else "train" if str((latest or {}).get("tcl_status", "")).lower() in {"fresh", "balanced", "productive"}
+        "rest" if tcl_status in {"fatigued", "vermoeid", "very_fatigued", "zeer_vermoeid"}
+        else "easy" if tcl_status in {"loaded"}
+        else "train" if tcl_status in {"fresh", "balanced", "productive"}
         else "unknown"
     )
 
     load_score = (
         strava_readiness.get("daily_load")
         if strava_readiness
-        else (latest.get("tcl") if latest else None)
+        else to_float(latest.get("tcl")) if latest else None
     )
 
     home_status = {
@@ -1019,8 +1055,8 @@ def home():
         delta_weight=delta_weight,
         delta_lean=delta_lean,
         delta_bf=delta_bf,
-        lbmi=lbmi,
-        delta_lbmi=delta_lbmi,
+        lbmi_display=lbmi_display,
+        delta_lbmi_display=delta_lbmi_display,
         recovery=recovery,
         home_status=home_status,
         training_advice=training_advice,

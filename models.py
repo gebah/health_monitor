@@ -11,6 +11,21 @@ def get_latest_daily_metrics():
     """).fetchone()
     return row_to_dict(row) or {}
 
+# models.py
+def _to_float(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    s = str(value).strip().replace(",", ".")
+    if not s:
+        return None
+
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 def avg_ignore_none(values):
     vals = [v for v in values if v not in (None, "")]
@@ -40,43 +55,44 @@ def get_latest_hume_body():
     return row_to_dict(row)
 
 def calc_lbmi(lean_mass_kg: float | None, height_m: float):
-    if lean_mass_kg is None or not height_m or height_m <= 0:
+    lean_mass_kg = _to_float(lean_mass_kg)
+    height_m = _to_float(height_m)
+
+    if lean_mass_kg is None or height_m is None or height_m <= 0:
         return None
     return lean_mass_kg / (height_m ** 2)
 
-def calc_body_deltas(latest_hume: dict | None, *, target_weight: float, target_lean: float, target_bf: float, height_m: float):
-    """
-    Returns dict with:
-      delta_weight, delta_lean, delta_bf, lbmi, delta_lbmi
-    """
-    if not latest_hume:
-        return {
-            "delta_weight": None,
-            "delta_lean": None,
-            "delta_bf": None,
-            "lbmi": None,
-            "delta_lbmi": None,
-        }
 
-    weight = latest_hume.get("weight_kg")
-    lean = latest_hume.get("lean_mass_kg")
-    bf = latest_hume.get("body_fat_pct")
+def calc_body_deltas(latest_hume, target_weight=90, target_lean=70, target_bf=17.5, height_m=1.92):
+    latest_hume = latest_hume or {}
 
-    delta_weight = (weight - target_weight) if weight is not None else None
-    delta_lean = (lean - target_lean) if lean is not None else None
-    delta_bf = (bf - target_bf) if bf is not None else None
+    weight = _to_float(latest_hume.get("weight_kg"))
+    lean = _to_float(latest_hume.get("lean_mass_kg"))
+    body_fat = _to_float(latest_hume.get("body_fat_pct"))
 
-    lbmi = calc_lbmi(lean, height_m)
-    target_lbmi = calc_lbmi(target_lean, height_m)
-    delta_lbmi = (lbmi - target_lbmi) if (lbmi is not None and target_lbmi is not None) else None
+    delta_weight = (weight - float(target_weight)) if weight is not None else None
+    delta_lean = (lean - float(target_lean)) if lean is not None else None
+    delta_bf = (body_fat - float(target_bf)) if body_fat is not None else None
+
+    lbmi = None
+    delta_lbmi = None
+    if lean is not None and height_m:
+        lbmi = lean / (float(height_m) ** 2)
+        target_lbmi = float(target_lean) / (float(height_m) ** 2)
+        delta_lbmi = lbmi - target_lbmi
 
     return {
+        "weight": weight,
+        "lean": lean,
+        "body_fat": body_fat,
         "delta_weight": delta_weight,
         "delta_lean": delta_lean,
         "delta_bf": delta_bf,
         "lbmi": lbmi,
         "delta_lbmi": delta_lbmi,
     }
+
+
 def debug_db_overview():
     conn = get_conn()
 
