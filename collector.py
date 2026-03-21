@@ -10,33 +10,35 @@ from typing import Any
 
 import requests
 from garminconnect import Garmin
+from dotenv import load_dotenv
+
+from readiness import compute_strava_readiness_series
+
+load_dotenv("/etc/health_monitor.env")
+
 
 # ----------------------------
 # Config
 # ----------------------------
 DB_PATH = os.environ.get(
-    "GARMIN_DB_PATH",
-    os.path.expanduser("/home/gba/Documenten/PycharmProjects/health_monitor/garmin.sqlite"),
+    "HEALTH_DB",
+    os.environ.get(
+        "GARMIN_DB_PATH",
+        os.path.expanduser("/home/gba/Documenten/PycharmProjects/health_monitor/health.sqlite"),
+    ),
 )
-
-TOKEN_DIR = os.environ.get(
-    "GARMIN_TOKEN_DIR",
-    os.path.expanduser("~/.config/health_monitor"),
-)
-TOKEN_PATH = os.path.join(TOKEN_DIR, "garmin_tokens.json")
 
 SYNC_DAYS = int(os.environ.get("GARMIN_SYNC_DAYS", "21"))
 
-# Strava env vars (needed for refresh during sync; initial connect happens via Flask app)
 STRAVA_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID")
 STRAVA_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET")
 STRAVA_FTP = float(os.environ.get("STRAVA_FTP", "0") or 0)
+
 
 # ----------------------------
 # Helpers
 # ----------------------------
 def safe_call(fn, *args, **kwargs):
-    """Call Garmin API function and return None on failure."""
     try:
         return fn(*args, **kwargs)
     except Exception as e:
@@ -45,7 +47,6 @@ def safe_call(fn, *args, **kwargs):
 
 
 def pick_first(d: dict, paths: list[str]):
-    """Pick first existing nested value from dict using dot-paths."""
     for p in paths:
         cur: Any = d
         ok = True
@@ -67,32 +68,8 @@ def get_client() -> Garmin:
     email = os.environ["GARMIN_EMAIL"]
     password = os.environ["GARMIN_PASSWORD"]
 
-    os.makedirs(TOKEN_DIR, exist_ok=True)
-
-    # Try token-based session first
-    if os.path.exists(TOKEN_PATH):
-        try:
-            with open(TOKEN_PATH, "r", encoding="utf-8") as f:
-                tokens = json.load(f)
-            api = Garmin(email, password, **tokens)
-            api.login()
-            return api
-        except Exception as e:
-            print(f"[warn] token login failed, falling back to password login: {e}")
-
-    # Fallback: password login
     api = Garmin(email, password)
     api.login()
-
-    # Save tokens for next runs
-    try:
-        tokens = api.get_tokens()
-        with open(TOKEN_PATH, "w", encoding="utf-8") as f:
-            json.dump(tokens, f)
-        os.chmod(TOKEN_PATH, 0o600)
-    except Exception as e:
-        print(f"[warn] could not save tokens: {e}")
-
     return api
 
 
@@ -100,7 +77,6 @@ def get_client() -> Garmin:
 # SQLite Schema
 # ----------------------------
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    # Garmin activities
     conn.execute("""
     CREATE TABLE IF NOT EXISTS activities (
         activity_id INTEGER PRIMARY KEY,
@@ -123,7 +99,6 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     ON activities(start_time_local)
     """)
 
-    # Garmin daily metrics
     conn.execute("""
     CREATE TABLE IF NOT EXISTS daily_metrics (
         day TEXT PRIMARY KEY,
@@ -139,7 +114,6 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     )
     """)
 
-    # Strava tokens (populated by Flask /strava/connect + /strava/callback)
     conn.execute("""
     CREATE TABLE IF NOT EXISTS strava_tokens (
         athlete_id INTEGER PRIMARY KEY,
@@ -151,7 +125,6 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     )
     """)
 
-    # Strava activities
     conn.execute("""
     CREATE TABLE IF NOT EXISTS strava_activities (
         strava_activity_id INTEGER PRIMARY KEY,
@@ -162,6 +135,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         moving_time_s REAL,
         elapsed_time_s REAL,
         suffer_score REAL,
+        tcl REAL,
         raw_json TEXT,
         synced_at TEXT
     )
@@ -170,6 +144,31 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     CREATE INDEX IF NOT EXISTS idx_strava_acts_start_time
     ON strava_activities(start_time_local)
     """)
+
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS strava_daily_load (
+        day TEXT PRIMARY KEY,
+        daily_load REAL
+    )
+    """)
+
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS readiness_daily (
+        day TEXT PRIMARY KEY,
+        daily_load REAL,
+        fatigue REAL,
+        fitness REAL,
+        form REAL,
+        readiness_score INTEGER,
+        recovery_gauge INTEGER,
+        source TEXT DEFAULT 'strava'
+    )
+    """)
+
+    # Voor bestaande DB's waar tcl nog ontbreekt
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(strava_activities)").fetchall()}
+    if "tcl" not in cols:
+        conn.execute("ALTER TABLE strava_activities ADD COLUMN tcl REAL")
 
     conn.commit()
 
@@ -192,19 +191,16 @@ def upsert_activities(conn: sqlite3.Connection, acts: list[dict[str, Any]]) -> i
         if not activity_id:
             continue
 
-        # activityType can be string or dict depending on endpoint/version
         atype = a.get("activityType")
         if isinstance(atype, dict):
             atype = atype.get("typeKey") or atype.get("typeId") or atype.get("name")
         if atype is not None and not isinstance(atype, str):
             atype = str(atype)
 
-        # avg_power key can vary
         avg_power = a.get("averagePower")
         if avg_power is None:
             avg_power = a.get("avgPower")
 
-        # Your JSON keys (as you printed): aerobicTrainingEffect + vO2MaxValue
         training_effect = a.get("aerobicTrainingEffect")
         vo2max_value = a.get("vO2MaxValue")
 
@@ -291,7 +287,6 @@ def fetch_and_store_daily_metrics(api: Garmin, conn: sqlite3.Connection, days: i
 
         raw = {"sleep": sleep, "stress": stress, "hrv": hrv, "bb": bb, "rhr": rhr}
 
-        # ---- Sleep (primary source for sleep + RHR + overnight HRV) ----
         if isinstance(sleep, dict):
             payload["sleep_seconds"] = pick_first(sleep, [
                 "dailySleepDTO.sleepTimeSeconds",
@@ -311,14 +306,12 @@ def fetch_and_store_daily_metrics(api: Garmin, conn: sqlite3.Connection, days: i
                 "dailySleepDTO.avgOvernightHrv",
             ])
 
-        # ---- Stress ----
         if isinstance(stress, dict):
             payload["avg_stress"] = pick_first(stress, [
                 "avgStressLevel",
                 "averageStressLevel",
             ])
 
-        # ---- HRV fallback (if not found in sleep) ----
         if payload["hrv_rmssd"] is None and isinstance(hrv, dict):
             payload["hrv_rmssd"] = pick_first(hrv, [
                 "hrvSummary.rmssd",
@@ -326,7 +319,6 @@ def fetch_and_store_daily_metrics(api: Garmin, conn: sqlite3.Connection, days: i
                 "hrvSummary.overallRmssd",
             ])
 
-        # ---- Body Battery ----
         if isinstance(bb, list) and bb and isinstance(bb[0], dict):
             arr = bb[0].get("bodyBatteryValuesArray")
             if isinstance(arr, list) and arr:
@@ -345,7 +337,6 @@ def fetch_and_store_daily_metrics(api: Garmin, conn: sqlite3.Connection, days: i
                     payload["bb_high"] = max(vals)
                     payload["bb_low"] = min(vals)
 
-        # ---- RHR fallback (if not found in sleep) ----
         if payload["resting_hr"] is None and isinstance(rhr, dict):
             payload["resting_hr"] = pick_first(rhr, [
                 "allMetrics.restingHeartRate.value",
@@ -367,10 +358,6 @@ def fetch_and_store_daily_metrics(api: Garmin, conn: sqlite3.Connection, days: i
 # Strava Sync
 # ----------------------------
 def get_strava_access_token(conn: sqlite3.Connection) -> str | None:
-    """
-    Reads token from DB (inserted by Flask OAuth callback).
-    Refreshes token if expired.
-    """
     row = conn.execute("""
         SELECT athlete_id, access_token, refresh_token, expires_at
         FROM strava_tokens
@@ -398,7 +385,7 @@ def get_strava_access_token(conn: sqlite3.Connection) -> str | None:
         "client_secret": STRAVA_CLIENT_SECRET,
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
-    })
+    }, timeout=30)
     r.raise_for_status()
     tok = r.json()
 
@@ -421,10 +408,6 @@ def get_strava_access_token(conn: sqlite3.Connection) -> str | None:
 
 
 def sync_strava_activities(conn: sqlite3.Connection, days: int) -> int:
-    """
-    Pulls athlete activities from Strava and stores them.
-    Weekly load will be computed in Flask from suffer_score with fallback.
-    """
     access_token = get_strava_access_token(conn)
     if not access_token:
         return 0
@@ -450,38 +433,27 @@ def sync_strava_activities(conn: sqlite3.Connection, days: int) -> int:
             break
 
         for a in acts:
-            moving = a.get("moving_time")          # sec
-            dist_m = a.get("distance")             # meters
-            suffer = a.get("suffer_score")         # may be None
-            avg_hr = a.get("average_heartrate")    # may be None
-
+            moving = a.get("moving_time")
+            dist_m = a.get("distance")
+            suffer = a.get("suffer_score")
             tcl = None
 
-            # 1) power-based if available
             weighted = a.get("weighted_average_watts")
             if STRAVA_FTP > 0 and weighted is not None and moving is not None:
                 intensity = float(weighted) / STRAVA_FTP
                 tcl = (intensity * intensity) * (float(moving) / 36.0)
-
-            # 2) else: use suffer_score as TCL proxy
             elif suffer is not None:
                 tcl = float(suffer)
-
-            # 3) else: simple fallback
             else:
                 mins = (float(moving) / 60.0) if moving else 0.0
                 km = (float(dist_m) / 1000.0) if dist_m else 0.0
                 tcl = mins + km * 0.5
 
-            # Optional HR weighting (only if no suffer_score and HR exists)
-            # if suffer is None and avg_hr is not None:
-            #     tcl *= (float(avg_hr) / 140.0)
-
             conn.execute("""
                 INSERT OR REPLACE INTO strava_activities (
-                strava_activity_id, start_time_local, name, type,
-                distance_m, moving_time_s, elapsed_time_s, suffer_score,
-                tcl, raw_json, synced_at
+                    strava_activity_id, start_time_local, name, type,
+                    distance_m, moving_time_s, elapsed_time_s, suffer_score,
+                    tcl, raw_json, synced_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 a["id"],
@@ -505,8 +477,66 @@ def sync_strava_activities(conn: sqlite3.Connection, days: int) -> int:
     conn.commit()
     return saved
 
+
+def rebuild_strava_daily_load(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM strava_daily_load")
+
+    conn.execute("""
+        INSERT INTO strava_daily_load (day, daily_load)
+        SELECT
+            date(start_time_local) AS day,
+            SUM(COALESCE(tcl, 0)) AS daily_load
+        FROM strava_activities
+        WHERE start_time_local IS NOT NULL
+        GROUP BY date(start_time_local)
+        ORDER BY day
+    """)
+
+    conn.commit()
+
+
+def rebuild_readiness(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("""
+        SELECT day, daily_load
+        FROM strava_daily_load
+        ORDER BY day
+    """).fetchall()
+
+    if not rows:
+        conn.execute("DELETE FROM readiness_daily")
+        conn.commit()
+        return
+
+    data = [
+        (datetime.fromisoformat(r[0]).date(), float(r[1] or 0.0))
+        for r in rows
+    ]
+
+    series = compute_strava_readiness_series(data)
+
+    conn.execute("DELETE FROM readiness_daily")
+    conn.executemany("""
+        INSERT INTO readiness_daily (
+            day, daily_load, fatigue, fitness, form,
+            readiness_score, recovery_gauge, source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, [
+        (
+            row["day"],
+            row["daily_load"],
+            row["fatigue"],
+            row["fitness"],
+            row["form"],
+            row["readiness_score"],
+            row["recovery_gauge"],
+            row["source"],
+        )
+        for row in series
+    ])
+    conn.commit()
+
+
 def sync_garmin(days: int = SYNC_DAYS) -> tuple[int, int]:
-    """Sync Garmin activities + daily metrics. Returns (n_acts, n_days)."""
     api = get_client()
 
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -521,21 +551,40 @@ def sync_garmin(days: int = SYNC_DAYS) -> tuple[int, int]:
 
 
 def sync_strava(days: int = SYNC_DAYS) -> int:
-    """Sync Strava activities. Returns n_strava."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         ensure_schema(conn)
         n_strava = sync_strava_activities(conn, days)
+        rebuild_strava_daily_load(conn)
+        rebuild_readiness(conn)
+
     return n_strava
 
 
 def sync_all(days: int = SYNC_DAYS) -> dict[str, int]:
-    """Sync Garmin + Strava. Returns counts."""
-    n_acts, n_days = sync_garmin(days=days)
-    n_strava = sync_strava(days=days)
-    return {"garmin_activities": n_acts, "daily_metrics": n_days, "strava_activities": n_strava}
+    result = {
+        "garmin_activities": 0,
+        "daily_metrics": 0,
+        "strava_activities": 0,
+    }
 
-def clamp(x: float, lo: float = 0.0, hi: float = 100.0) -> float:
+    try:
+        n_acts, n_days = sync_garmin(days=days)
+        result["garmin_activities"] = n_acts
+        result["daily_metrics"] = n_days
+    except Exception as e:
+        print(f"[warn] Garmin sync skipped: {e}")
+
+    try:
+        result["strava_activities"] = sync_strava(days=days)
+    except Exception as e:
+        print(f"[warn] Strava sync failed: {e}")
+        raise
+
+    return result
+
+
+def clamp_score(x: float, lo: float = 0.0, hi: float = 100.0) -> float:
     try:
         x = float(x)
     except Exception:
@@ -544,12 +593,6 @@ def clamp(x: float, lo: float = 0.0, hi: float = 100.0) -> float:
 
 
 def fuel_score(calories: float | None, target: float) -> float | None:
-    """
-    Score 0..100 op basis van calorie-inname vs target.
-    80-120% target => 100
-    <80% => lineair naar 0 bij 50%
-    >120% => lichte penalty, naar 70 bij 140%
-    """
     if calories is None or target <= 0:
         return None
 
@@ -559,13 +602,12 @@ def fuel_score(calories: float | None, target: float) -> float | None:
         return 100.0
 
     if ratio < 0.8:
-        # 0.5 -> 0, 0.8 -> 100
         s = 100.0 * (ratio - 0.5) / (0.8 - 0.5)
-        return clamp(s)
+        return clamp_score(s)
 
-    # ratio > 1.2: 1.2->100, 1.4->70 (cap op 50)
     s = 100.0 - (ratio - 1.2) * (30.0 / (1.4 - 1.2))
-    return clamp(max(50.0, s))
+    return clamp_score(max(50.0, s))
+
 
 def get_fitatu_calories(conn, day: str) -> float | None:
     row = conn.execute("SELECT calories FROM fitatu_daily WHERE day = ?", (day,)).fetchone()
@@ -589,24 +631,16 @@ def weighted_score(parts: dict[str, float | None], weights: dict[str, float]) ->
 # ----------------------------
 def main() -> None:
     print("DB_PATH =", DB_PATH)
-    api = get_client()
 
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         ensure_schema(conn)
 
-        # Garmin
-        acts = fetch_activities(api, SYNC_DAYS)
-        n_acts = upsert_activities(conn, acts)
-        n_days = fetch_and_store_daily_metrics(api, conn, SYNC_DAYS)
-
-        # Strava (requires tokens already stored by Flask OAuth flow)
         n_strava = sync_strava_activities(conn, SYNC_DAYS)
+        rebuild_strava_daily_load(conn)
+        rebuild_readiness(conn)
 
-    print(f"[{datetime.now().isoformat(timespec='seconds')}] synced garmin activities: {n_acts}")
-    print(f"[{datetime.now().isoformat(timespec='seconds')}] synced daily_metrics days: {n_days}")
     print(f"[{datetime.now().isoformat(timespec='seconds')}] synced strava activities: {n_strava}")
-
 
 
 if __name__ == "__main__":

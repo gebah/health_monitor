@@ -1,99 +1,33 @@
-# readiness.py
+#!/usr/bin/env python3
+from __future__ import annotations
 
-# ------------------------
-# HELPER
-# ------------------------
-
-def clamp(v, lo=0, hi=100):
-
-    return max(lo, min(hi, v))
+from datetime import date, timedelta
+from math import exp
+from typing import Iterable
 
 
 # ------------------------
-# READINESS SCORE
+# Algemene helpers
 # ------------------------
 
-def readiness_score(latest: dict | None):
-
-    latest = latest or {}
-
-    hrv = latest.get("hrv_rmssd")
-    sleep = latest.get("sleep_score")
-    stress = latest.get("avg_stress")
-    bb = latest.get("body_battery_high")
-
-    hrv_score = clamp((hrv - 20) * 1.5) if hrv is not None else 50
-
-    sleep_score = sleep if sleep is not None else 50
-
-    stress_score = clamp(100 - stress * 2) if stress is not None else 50
-
-    bb_score = bb if bb is not None else 50
-
-
-    score = round(
-
-        0.35 * hrv_score +
-        0.35 * sleep_score +
-        0.15 * stress_score +
-        0.15 * bb_score
-
-    )
-
-
-    label = (
-
-        "Good" if score >= 75 else
-        "OK" if score >= 50 else
-        "Low"
-
-    )
-
-
-    return {
-
-        "score": score,
-
-        "label": label,
-
-        "components": {
-
-            "hrv": round(hrv_score),
-            "sleep": round(sleep_score),
-            "stress": round(stress_score),
-            "bb": round(bb_score),
-
-            # nodig voor template
-            "fuel": None
-
-        },
-
-        # nodig voor template
-        "kcal": None,
-        "kcal_target": None
-
-    }
-
-def clamp(value, low=0, high=100):
+def clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
     return max(low, min(high, value))
 
 
+# ------------------------
+# Legacy wellness / Garmin-style helpers
+# Deze laat ik staan voor compatibiliteit met bestaande UI/code.
+# ------------------------
+
 def score_hrv(latest_hrv, baseline_hrv=None):
-    """
-    Zet HRV om naar 0-100 score.
-    Als baseline bekend is, vergelijk met baseline.
-    Anders gebruik een simpele fallback schaal.
-    """
     if latest_hrv is None:
         return None
 
     if baseline_hrv and baseline_hrv > 0:
         ratio = latest_hrv / baseline_hrv
-        # 1.0 = 100, 0.8 = 60, 0.7 = 40, 1.1 = 100
         score = 100 * (ratio - 0.5) / 0.5
-        return clamp(round(score))
+        return round(clamp(score))
 
-    # fallback
     if latest_hrv >= 80:
         return 100
     if latest_hrv >= 70:
@@ -110,13 +44,10 @@ def score_hrv(latest_hrv, baseline_hrv=None):
 def score_sleep(sleep_score):
     if sleep_score is None:
         return None
-    return clamp(round(sleep_score))
+    return round(clamp(float(sleep_score)))
 
 
 def score_stress(avg_stress):
-    """
-    Lager stress = beter.
-    """
     if avg_stress is None:
         return None
 
@@ -151,9 +82,6 @@ def score_body_battery(body_battery_high):
 
 
 def score_resting_hr(resting_hr, baseline_rhr=None):
-    """
-    Lager of baseline = beter.
-    """
     if resting_hr is None:
         return None
 
@@ -171,7 +99,6 @@ def score_resting_hr(resting_hr, baseline_rhr=None):
             return 35
         return 20
 
-    # fallback als baseline onbekend
     if resting_hr <= 50:
         return 95
     if resting_hr <= 55:
@@ -184,16 +111,10 @@ def score_resting_hr(resting_hr, baseline_rhr=None):
 
 
 def score_tcl_status(tcl_status):
-    """
-    Verwacht strings zoals:
-    'fresh', 'balanced', 'loaded', 'fatigued', 'very_fatigued'
-    Pas mapping aan aan jouw eigen TCL labels.
-    """
     if not tcl_status:
         return None
 
     s = str(tcl_status).strip().lower()
-
     mapping = {
         "fresh": 95,
         "balanced": 85,
@@ -208,10 +129,6 @@ def score_tcl_status(tcl_status):
 
 
 def weighted_average(parts):
-    """
-    parts = [(score, weight), ...]
-    Negeert None scores en herverdeelt gewichten automatisch.
-    """
     valid = [(score, weight) for score, weight in parts if score is not None]
     if not valid:
         return None
@@ -225,15 +142,11 @@ def weighted_average(parts):
 
 
 def classify_recovery(score, latest_hrv=None, baseline_hrv=None, tcl_status=None):
-    """
-    Eindlabel + extra safety rules.
-    """
     if score is None:
         return "unknown", ["Onvoldoende data"]
 
     reasons = []
 
-    # Hardere veiligheidsregels
     if latest_hrv and baseline_hrv and baseline_hrv > 0:
         ratio = latest_hrv / baseline_hrv
         if ratio < 0.80:
@@ -317,3 +230,143 @@ def calculate_recovery_gauge(
             "tcl": tcl_s,
         }
     }
+
+
+def calculate_wellness_readiness(latest: dict | None):
+    latest = latest or {}
+
+    hrv = latest.get("hrv_rmssd")
+    sleep = latest.get("sleep_score")
+    stress = latest.get("avg_stress")
+    bb = latest.get("body_battery_high")
+
+    hrv_score = clamp((hrv - 20) * 1.5) if hrv is not None else 50
+    sleep_score = sleep if sleep is not None else 50
+    stress_score = clamp(100 - stress * 2) if stress is not None else 50
+    bb_score = bb if bb is not None else 50
+
+    score = round(
+        0.35 * hrv_score +
+        0.35 * sleep_score +
+        0.15 * stress_score +
+        0.15 * bb_score
+    )
+
+    label = (
+        "Good" if score >= 75 else
+        "OK" if score >= 50 else
+        "Low"
+    )
+
+    return {
+        "score": score,
+        "label": label,
+        "components": {
+            "hrv": round(hrv_score),
+            "sleep": round(sleep_score),
+            "stress": round(stress_score),
+            "bb": round(bb_score),
+            "fuel": None,
+        },
+        "kcal": None,
+        "kcal_target": None,
+    }
+
+
+# ------------------------
+# Nieuwe Strava/TCL-based readiness logica
+# ------------------------
+
+def recovery_gauge_from_form(form: float) -> int:
+    score = 50 + form * 2.2
+    return max(1, min(100, round(score)))
+
+
+def readiness_from_load(form: float, fatigue: float, fitness: float, last2d_load: float) -> int:
+    score = 65
+
+    score += max(-25, min(25, form * 1.5))
+
+    if fitness > 0:
+        ratio = last2d_load / fitness
+        if ratio > 1.8:
+            score -= 12
+        elif ratio > 1.3:
+            score -= 7
+        elif ratio < 0.4:
+            score += 4
+
+    if fitness > 0:
+        if fatigue > fitness * 1.20:
+            score -= 8
+        elif fatigue < fitness * 0.85:
+            score += 4
+
+    return max(1, min(100, round(score)))
+
+
+def ewma_value(loads: list[float], tau: float) -> float:
+    total = 0.0
+    for i, load in enumerate(loads):
+        age = len(loads) - 1 - i
+        total += float(load) * exp(-age / tau)
+    return total
+
+
+def normalize_daily_loads(
+    daily_loads: Iterable[tuple[date, float]]
+) -> list[tuple[date, float]]:
+    data = sorted((d, float(load or 0.0)) for d, load in daily_loads)
+    if not data:
+        return []
+
+    start = data[0][0]
+    end = data[-1][0]
+    by_day = {d: load for d, load in data}
+
+    out = []
+    cur = start
+    while cur <= end:
+        out.append((cur, by_day.get(cur, 0.0)))
+        cur += timedelta(days=1)
+
+    return out
+
+
+def compute_strava_readiness_series(
+    daily_loads: Iterable[tuple[date, float]]
+) -> list[dict]:
+    series = normalize_daily_loads(daily_loads)
+    if not series:
+        return []
+
+    out: list[dict] = []
+
+    for idx in range(len(series)):
+        window = series[: idx + 1]
+        loads_only = [load for _, load in window]
+
+        fatigue = ewma_value(loads_only, tau=7)
+        fitness = ewma_value(loads_only, tau=42)
+        form = fitness - fatigue
+        last2d_load = sum(load for _, load in window[-2:])
+
+        out.append({
+            "day": window[-1][0].isoformat(),
+            "daily_load": round(window[-1][1], 1),
+            "fatigue": round(fatigue, 1),
+            "fitness": round(fitness, 1),
+            "form": round(form, 1),
+            "readiness_score": readiness_from_load(form, fatigue, fitness, last2d_load),
+            "recovery_gauge": recovery_gauge_from_form(form),
+            "source": "strava",
+        })
+
+    return out
+
+
+def compute_strava_readiness_today(
+    daily_loads: Iterable[tuple[date, float]]
+) -> dict | None:
+    series = compute_strava_readiness_series(daily_loads)
+    return series[-1] if series else None

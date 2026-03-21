@@ -2,3 +2,6 @@
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+__pycache*
+bootstrap*
+__pycache__/*

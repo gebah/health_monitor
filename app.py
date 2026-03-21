@@ -976,6 +976,7 @@ def collectors_run():
     flash("Collector gestart", "success")
     return redirect("/collectors")
 
+
 @app.route("/api/pro_weekly_analysis")
 def api_pro_weekly_analysis():
     days = int(request.args.get("days", 180))

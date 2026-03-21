@@ -184,12 +184,21 @@ def main():
 
                 return 0
 
-            except Exception:
+            except Exception as e:
                 dur = time.time() - t0
                 finished = utc_now_iso()
                 tb = traceback.format_exc()
-                # korte message in DB, volledige trace in journal
                 short = f"FAILED after {dur:.1f}s: {tb.splitlines()[-1]}"
+
+                if target == "garmin":
+                    msg = f"Skipped Garmin sync due to auth/API issue: {e}"
+                    log.warning(f"{msg}\n{tb}")
+
+                    if conn and run_id is not None:
+                        finish_run(conn, run_id, status="skipped", finished_at=finished, message=msg)
+
+                    return 0
+
                 log.error(f"Sync FAILED target={target} duration={dur:.1f}s\n{tb}")
 
                 if conn and run_id is not None:
