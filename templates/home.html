@@ -3,7 +3,6 @@
 
 {% block body_attrs %}
 data-days="{{ days }}"
-data-readiness-score="{{ readiness_score }}"
 data-user-name="{{ USER_NAME }}"
 data-user-height="{{ USER_HEIGHT }}"
 data-target-weight="90"
@@ -15,364 +14,219 @@ data-weekly-kcal-target="17500"
 {% block content %}
 
 <h1>Health Monitor</h1>
-<p class="muted">Laatste update: {{ latest.day if latest else "—" }}</p>
+
+<div class="status-strip">
+  <div class="status-strip__item">
+    <div class="status-strip__label">Advies</div>
+    <div class="status-strip__value">
+      <span class="badge badge--{{ home_status.advice.state }}">{{ home_status.advice.label }}</span>
+      <strong>{{ home_status.advice.score if home_status.advice.score is not none else "—" }}</strong>
+    </div>
+  </div>
+
+  <div class="status-strip__item">
+    <div class="status-strip__label">Vorm</div>
+    <div class="status-strip__value">
+      <span class="badge badge--{{ home_status.form.state }}">{{ home_status.form.label }}</span>
+      <strong>{{ home_status.form.score if home_status.form.score is not none else "—" }}</strong>
+    </div>
+  </div>
+
+  <div class="status-strip__item">
+    <div class="status-strip__label">Fitness</div>
+    <div class="status-strip__value">
+      <strong>{{ home_status.fitness.score if home_status.fitness.score is not none else "—" }}</strong>
+    </div>
+  </div>
+
+  <div class="status-strip__item">
+    <div class="status-strip__label">Vermoeidheid</div>
+    <div class="status-strip__value">
+      <strong>{{ home_status.fatigue.score if home_status.fatigue.score is not none else "—" }}</strong>
+    </div>
+  </div>
+</div>
+
+<div class="grid2--top">
+  <div class="card">
+    <div class="card__header">
+      <h3>Trainingsadvies</h3>
+      <span class="badge badge--{{ training_advice.tone }}">{{ training_advice.label }}</span>
+    </div>
+
+    <div class="card__body">
+      <div class="insight-layout">
+        <div
+          class="recovery-gauge recovery-gauge--{{ training_advice.tone }}"
+          style="--value: {{ advice_score or 0 }};"
+        >
+          <svg viewBox="0 0 120 120" class="recovery-gauge__svg" aria-hidden="true">
+            <circle class="recovery-gauge__track" cx="60" cy="60" r="46"></circle>
+            <circle class="recovery-gauge__progress" cx="60" cy="60" r="46"></circle>
+          </svg>
+
+          <div class="recovery-gauge__center">
+            <div class="recovery-gauge__score">{{ advice_score if advice_score is not none else "—" }}</div>
+            <div class="recovery-gauge__label">{{ training_advice.label }}</div>
+          </div>
+        </div>
+
+        <div class="insight-copy">
+          <div class="insight-copy__title">{{ training_advice.summary }}</div>
+          <div class="insight-copy__text">{{ training_advice.details }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card strava-status-card">
+    <div class="card__header">
+      <h3>Strava status</h3>
+      <span class="badge badge--{{ strava_status.state if strava_status else 'unknown' }}">
+        {{ strava_status.label if strava_status else "—" }}
+      </span>
+    </div>
+
+    <div class="card__body">
+      {% if strava_status %}
+      <div class="strava-status-content">
+        <div class="metrics-grid">
+          <div class="metric-box">
+           <div class="metric-box__label">Fitness</div>
+          <div class="metric-box__value">{{ strava_status.fitness }}</div>
+          <div class="metric-box__sub">
+            {% if strava_status.fitness_delta > 0 %}
+              ↑ {{ strava_status.fitness_delta }}
+            {% elif strava_status.fitness_delta < 0 %}
+              ↓ {{ strava_status.fitness_delta | abs }}
+            {% else %}
+              → 0.0
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Vermoeidheid</div>
+          <div class="metric-box__value">{{ strava_status.fatigue }}</div>
+          <div class="metric-box__sub">
+            {% if strava_status.fatigue_delta > 0 %}
+              ↑ {{ strava_status.fatigue_delta }}
+            {% elif strava_status.fatigue_delta < 0 %}
+              ↓ {{ strava_status.fatigue_delta | abs }}
+            {% else %}
+              → 0.0
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Vorm</div>
+          <div class="metric-box__value">{{ strava_status.form }}</div>
+          <div class="metric-box__sub">
+            {% if strava_status.form_delta > 0 %}
+              ↑ {{ strava_status.form_delta }}
+            {% elif strava_status.form_delta < 0 %}
+              ↓ {{ strava_status.form_delta | abs }}
+            {% else %}
+              → 0.0
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Vandaag load</div>
+          <div class="metric-box__value">
+            {{ strava_status.daily_load if strava_status.daily_load is not none else "—" }}
+          </div>
+          <div class="metric-box__sub">vandaag</div>
+        </div>
+      </div>
+
+      <div class="chart chart--mini" id="strava_status_trend_chart"></div>
+    </div>
+    {% else %}
+      <div class="muted">Nog geen Strava load-data beschikbaar.</div>
+    {% endif %}
+    </div>
+  </div>
+</div>
+
 <div class="card">
   <div class="card__header">
     <h3>Hume</h3>
   </div>
 
   <div class="card__body">
-
     {% if latest_hume %}
+      <div class="metrics-grid">
+        <div class="metric-box">
+          <div class="metric-box__label">Weight</div>
+          <div class="metric-box__value">
+            {% if latest_hume.weight_kg is not none %}
+              {{ latest_hume.weight_kg | round(1) }} kg
+            {% else %}
+              —
+            {% endif %}
+          </div>
+        </div>
 
-    <div class="hume-grid">
+        <div class="metric-box">
+          <div class="metric-box__label">Body fat</div>
+          <div class="metric-box__value">
+            {% if latest_hume.body_fat_pct is not none %}
+              {{ latest_hume.body_fat_pct | round(1) }} %
+            {% else %}
+              —
+            {% endif %}
+          </div>
+        </div>
 
-      <div class="metric">
-        <span>Weight</span>
-        <strong>{{ latest_hume.weight_kg }} kg</strong>
+        <div class="metric-box">
+          <div class="metric-box__label">Lean mass</div>
+          <div class="metric-box__value">
+            {% if latest_hume.lean_mass_kg is not none %}
+              {{ latest_hume.lean_mass_kg | round(1) }} kg
+            {% else %}
+              —
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">LBMI</div>
+          <div class="metric-box__value">{{ lbmi_display if lbmi_display is not none else "—" }}</div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Δ weight</div>
+          <div class="metric-box__value">{{ delta_weight | round(1) if delta_weight is not none else "—" }}</div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Δ body fat</div>
+          <div class="metric-box__value">{{ delta_bf | round(1) if delta_bf is not none else "—" }}</div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Δ lean</div>
+          <div class="metric-box__value">{{ delta_lean | round(1) if delta_lean is not none else "—" }}</div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Δ LBMI</div>
+          <div class="metric-box__value">{{ delta_lbmi_display if delta_lbmi_display is not none else "—" }}</div>
+        </div>
       </div>
-
-      <div class="metric">
-        <span>Body fat</span>
-        <strong>{{ latest_hume.body_fat_pct }} %</strong>
-      </div>
-
-      <div class="metric">
-        <span>Lean mass</span>
-        <strong>{{ latest_hume.lean_mass_kg }} kg</strong>
-      </div>
-
-      <div class="metric">
-        <span>LBMI</span>
-        <strong>{{ lbmi_display if lbmi_display is not none else "—" }}</strong>
-      </div>
-
-      <div class="metric">
-        <span>Δ weight</span>
-        <strong>{{ delta_weight | round(1) if delta_weight is not none else "-" }}</strong>
-      </div>
-
-      <div class="metric">
-        <span>Δ body fat</span>
-        <strong>{{ delta_bf | round(1) if delta_bf is not none else "-" }}</strong>
-      </div>
-
-      <div class="metric">
-        <span>Δ lean</span>
-        <strong>{{ delta_lean | round(1) if delta_lean is not none else "-" }}</strong>
-      </div>
-
-      <div class="metric">
-        <span>Δ LBMI</span>
-        <strong>{{ delta_lbmi_display | round(2) if delta_lbmi_display is not none else "-" }}</strong>
-      </div>
-
-    </div>
-
     {% else %}
-
-    <div class="muted">
-      No Hume measurements yet
-    </div>
-
+      <div class="muted">No Hume measurements yet</div>
     {% endif %}
-
   </div>
 </div>
-
-<div class="status-strip">
-  <div class="status-strip__item">
-    <div class="status-strip__label">Recovery</div>
-    <div class="status-strip__value">
-      <span class="badge badge--{{ home_status.recovery.state }}">{{ home_status.recovery.label }}</span>
-      <strong>{{ home_status.recovery.score if home_status.recovery.score is not none else "-" }}</strong>
-    </div>
-  </div>
-
-  <div class="status-strip__item">
-    <div class="status-strip__label">Readiness</div>
-    <div class="status-strip__value">
-      <span class="badge badge--{{ home_status.readiness.state }}">{{ home_status.readiness.label }}</span>
-      <strong>{{ home_status.readiness.score if home_status.readiness.score is not none else "-" }}</strong>
-    </div>
-  </div>
-
-  <div class="status-strip__item">
-    <div class="status-strip__label">Load</div>
-    <div class="status-strip__value">
-      <span class="badge badge--{{ home_status.load.state }}">{{ home_status.load.label }}</span>
-      <strong>{{ home_status.load.score if home_status.load.score is not none else "-" }}</strong>
-    </div>
-  </div>
-</div>
-
-<h2>Training readiness</h2>
-{% if strava_readiness %}
-  {% set rs = strava_readiness.readiness_score %}
-  {% set tone = "good" if rs >= 75 else ("ok" if rs >= 50 else "bad") %}
-
-  <div class="readiness card">
-    <div class="readiness__top">
-      <div class="dial dial--{{ tone }}" style="--p: {{ rs }};">
-        <div class="dial__inner">
-          <div class="dial__value">{{ rs }}</div>
-          <div class="dial__label">{{ strava_readiness.label }}</div>
-        </div>
-      </div>
-
-      <div class="readiness__summary">
-        <div class="readiness__title">Today</div>
-
-        <div class="readiness__advice {{ tone }}">
-          <div style="font-weight:700; margin-bottom:2px;">
-            Load-based readiness
-          </div>
-
-          <div>
-            {{ strava_readiness.label }} · {{ strava_readiness.form_label }}
-          </div>
-
-          <div class="muted" style="margin-top:6px; font-size:12px;">
-            Gebaseerd op Strava TCL, fitness, fatigue en form.
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="readiness__bars">
-      <div class="bar">
-        <div class="bar__row"><div class="bar__name">Recovery gauge</div><div class="bar__val">{{ strava_readiness.recovery_gauge }}</div></div>
-        <div class="bar__track"><div class="bar__fill" style="--p: {{ strava_readiness.recovery_gauge }};"></div></div>
-      </div>
-
-      <div class="bar">
-        <div class="bar__row"><div class="bar__name">Fitness</div><div class="bar__val">{{ strava_readiness.fitness }}</div></div>
-        <div class="bar__track"><div class="bar__fill" style="--p: {{ [strava_readiness.fitness, 100] | min }};"></div></div>
-      </div>
-
-      <div class="bar">
-        <div class="bar__row"><div class="bar__name">Fatigue</div><div class="bar__val">{{ strava_readiness.fatigue }}</div></div>
-        <div class="bar__track"><div class="bar__fill" style="--p: {{ [strava_readiness.fatigue, 100] | min }};"></div></div>
-      </div>
-
-      <div class="bar">
-        <div class="bar__row"><div class="bar__name">Form</div><div class="bar__val">{{ strava_readiness.form }}</div></div>
-        <div class="bar__track"><div class="bar__fill" style="--p: {{ [strava_readiness.recovery_gauge, 100] | min }};"></div></div>
-      </div>
-
-      <div class="bar">
-        <div class="bar__row"><div class="bar__name">Daily load</div><div class="bar__val">{{ strava_readiness.daily_load }}</div></div>
-        <div class="bar__track"><div class="bar__fill" style="--p: {{ [strava_readiness.daily_load, 100] | min }};"></div></div>
-      </div>
-    </div>
-  </div>
-{% elif readiness %}
-  {% set rs = readiness.score %}
-  {% set tone = "good" if rs >= 75 else ("ok" if rs >= 50 else "bad") %}
-
-  <div class="readiness card">
-    <div class="readiness__top">
-      <div class="dial dial--{{ tone }}" style="--p: {{ rs }};">
-        <div class="dial__inner">
-          <div class="dial__value">{{ rs }}</div>
-          <div class="dial__label">{{ readiness.label }}</div>
-        </div>
-      </div>
-
-      <div class="readiness__summary">
-        <div class="readiness__title">Today</div>
-
-        <div class="readiness__advice {{ readiness.tone }}">
-          <div style="font-weight:700; margin-bottom:2px;">
-            {{ readiness.icon }} {{ readiness.state }}
-          </div>
-
-          <div>{{ readiness.advice }}</div>
-
-          {% if readiness.why %}
-            <div class="muted" style="margin-top:6px; font-size:12px;">
-              {{ readiness.why }}
-            </div>
-          {% endif %}
-        </div>
-      </div>
-    </div>
-
-    <div class="readiness__bars">
-      {% set c = readiness.components %}
-
-      <div class="bar">
-        <div class="bar__row"><div class="bar__name">HRV</div><div class="bar__val">{{ c.hrv }}</div></div>
-        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.hrv }};"></div></div>
-      </div>
-
-      <div class="bar">
-        <div class="bar__row"><div class="bar__name">Sleep</div><div class="bar__val">{{ c.sleep }}</div></div>
-        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.sleep }};"></div></div>
-      </div>
-
-      <div class="bar">
-        <div class="bar__row"><div class="bar__name">Stress</div><div class="bar__val">{{ c.stress }}</div></div>
-        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.stress }};"></div></div>
-      </div>
-
-      <div class="bar">
-        <div class="bar__row"><div class="bar__name">Body Battery</div><div class="bar__val">{{ c.bb }}</div></div>
-        <div class="bar__track"><div class="bar__fill" style="--p: {{ c.bb }};"></div></div>
-      </div>
-
-      <div class="bar">
-        <div class="bar__row">
-          <div class="bar__name">Training load (7d TCL)</div>
-          <div class="bar__val">{{ readiness.tcl_7d }} / {{ readiness.tcl_target_7d }}</div>
-        </div>
-        <div class="bar__track">
-          <div class="bar__fill" style="--p: {{ c.load if c.load is not none else 0 }};"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-{% else %}
-  <div class="card">Nog geen readiness beschikbaar.</div>
-{% endif %}
-
-
-<div class="card">
-  <div class="card__header">
-    <h3>Recovery Gauge</h3>
-    <span class="badge badge--{{ strava_readiness.state if strava_readiness else recovery.state }}">
-      {{ strava_readiness.form_label if strava_readiness else recovery.label }}
-    </span>
-  </div>
-
-  <div class="card__body">
-    <div class="recovery-card-layout">
-      <div
-        class="recovery-gauge recovery-gauge--{{ strava_readiness.state if strava_readiness else recovery.state }}"
-        style="--value: {{ strava_readiness.recovery_gauge if strava_readiness else (recovery.score or 0) }};"
-      >
-        <svg viewBox="0 0 120 120" class="recovery-gauge__svg" aria-hidden="true">
-          <circle class="recovery-gauge__track" cx="60" cy="60" r="46"></circle>
-          <circle class="recovery-gauge__progress" cx="60" cy="60" r="46"></circle>
-        </svg>
-
-        <div class="recovery-gauge__center">
-          <div class="recovery-gauge__score">
-            {{ strava_readiness.recovery_gauge if strava_readiness else (recovery.score if recovery.score is not none else "-") }}
-          </div>
-          <div class="recovery-gauge__label">
-            {{ strava_readiness.form_label if strava_readiness else recovery.label }}
-          </div>
-        </div>
-      </div>
-
-      <div class="recovery-details">
-        <div class="recovery-meta">
-          {% if strava_readiness %}
-            Form {{ strava_readiness.form }}, fitness {{ strava_readiness.fitness }}, fatigue {{ strava_readiness.fatigue }}.
-          {% elif recovery.reasons %}
-            {{ recovery.reasons | join(', ') }}
-          {% else %}
-            Herstelstatus op basis van HRV, slaap, stress en TCL
-          {% endif %}
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="card">
-  <div class="card__header">
-    <h3>Trainingsadvies</h3>
-    <span class="badge badge--{{ training_advice.tone }}">{{ training_advice.label }}</span>
-  </div>
-
-  <div class="card__body">
-    <div class="recovery-card-layout">
-      <div
-        class="recovery-gauge recovery-gauge--{{ training_advice.code }}"
-        style="--value: {{ advice_score }};"
-      >
-        <svg viewBox="0 0 120 120" class="recovery-gauge__svg" aria-hidden="true">
-          <circle class="recovery-gauge__track" cx="60" cy="60" r="46"></circle>
-          <circle class="recovery-gauge__progress" cx="60" cy="60" r="46"></circle>
-        </svg>
-
-        <div class="recovery-gauge__center">
-          <div class="recovery-gauge__score">{{ advice_score }}</div>
-          <div class="recovery-gauge__label">{{ training_advice.label }}</div>
-        </div>
-      </div>
-
-      <div class="recovery-details">
-        <div class="recovery-meta" style="font-size:16px; color:var(--text); margin-bottom:10px;">
-          {{ training_advice.summary }}
-        </div>
-
-        <div class="recovery-meta">
-          {{ training_advice.details }}
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-
-<h2>Latest daily metrics</h2>
-{% if latest %}
-  {% set sleep_seconds = latest.get("sleep_seconds") %}
-  {% set sleep_hours = (sleep_seconds / 3600) if sleep_seconds else None %}
-
-  <div class="grid3">
-    <div class="card metric-card">
-      <div class="metric-title">Sleep score</div>
-      <div class="metric-value">{{ latest.get("sleep_score") if latest.get("sleep_score") is not none else "—" }}</div>
-    </div>
-
-    <div class="card metric-card">
-      <div class="metric-title">Sleep (hours)</div>
-      <div class="metric-value">{% if sleep_hours is not none %}{{ sleep_hours | round(2) }}{% else %}—{% endif %}</div>
-    </div>
-
-    <div class="card metric-card">
-      <div class="metric-title">Resting HR</div>
-      <div class="metric-value">{{ latest.get("resting_hr") if latest.get("resting_hr") is not none else "—" }}</div>
-    </div>
-
-    <div class="card metric-card">
-      <div class="metric-title">Avg stress</div>
-      <div class="metric-value">{{ latest.get("avg_stress") if latest.get("avg_stress") is not none else "—" }}</div>
-    </div>
-
-    <div class="card metric-card">
-      <div class="metric-title">HRV (RMSSD)</div>
-      <div class="metric-value">{{ latest.get("hrv_rmssd") if latest.get("hrv_rmssd") is not none else "—" }}</div>
-    </div>
-
-    <div class="card metric-card">
-      <div class="metric-title">Body Battery</div>
-      <div class="metric-value metric-small">
-        <div>High: {{ latest.get("body_battery_high") if latest.get("body_battery_high") is not none else "—" }}</div>
-        <div>Low: {{ latest.get("body_battery_low") if latest.get("body_battery_low") is not none else "—" }}</div>
-      </div>
-    </div>
-
-    <div class="card metric-card" id="form_metric" style="display:none;">
-      <div class="metric-title">Form (TSB) <span class=muted>today</span></div>
-      <div class="metric-value" id="form_metric_value">—</div>
-      <div class="muted" id="form_metric_label">—</div>
-      <div class="muted" id="form_metric_load" style="font-size:12px;">ATL — • CTL —</div>
-      <div class="muted" id="form_metric_advice" style="font-size:12px; margin-top:4px;">—</div>
-    </div>
-  </div>
-
-{% else %}
-  <p>Geen daily metrics gevonden.</p>
-{% endif %}
 
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
 <script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
 {% endblock %}

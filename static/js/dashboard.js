@@ -286,9 +286,12 @@ async function loadHumeBody() {
   const visceral= rows.map(r => toNum(r.visceral_fat_index));
 
   const baseLayout = {
+    height: 380,
     margin: { t: 10, r: 10, b: 40, l: 60 },
     xaxis: { type: "date" },
-    legend: { orientation: "h" }
+    legend: { orientation: "h" },
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
   };
 
   const kgTraces = [
@@ -348,6 +351,8 @@ async function loadLBMI() {
     { x, y, mode: "lines+markers", name: "LBMI" }
   ], {
     margin: { t: 10, r: 10, b: 40, l: 50 },
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
     xaxis: { type: "date" },
     yaxis: { title: "LBMI" },
     shapes: [
@@ -573,6 +578,74 @@ document.querySelectorAll(".gauge").forEach(g => {
   g.style.background = `conic-gradient(var(--brand) ${deg}deg, #e5e7eb ${deg}deg)`;
 });
 
+async function renderStravaStatusTrend() {
+  const el = document.getElementById("strava_status_trend_chart");
+  if (!el || typeof Plotly === "undefined") return;
+
+  const resp = await fetch("/api/strava_status_trend?days=7");
+  const data = await resp.json();
+  if (!data || !data.length) return;
+
+  const days = data.map(d => d.day);
+  const fitness = data.map(d => d.fitness);
+  const fatigue = data.map(d => d.fatigue);
+  const form = data.map(d => d.form);
+
+  const traces = [
+    {
+      x: days,
+      y: fitness,
+      name: "Fitness",
+      mode: "lines+markers",
+      line: { width: 3 },
+      marker: { size: 6 }
+    },
+    {
+      x: days,
+      y: fatigue,
+      name: "Vermoeidheid",
+      mode: "lines+markers",
+      line: { width: 3 },
+      marker: { size: 6 }
+    },
+    {
+      x: days,
+      y: form,
+      name: "Vorm",
+      mode: "lines+markers",
+      line: { width: 3 },
+      marker: { size: 6 }
+    }
+  ];
+
+  const layout = {
+    margin: { l: 36, r: 12, t: 8, b: 30 },
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+    legend: {
+      orientation: "h",
+      y: 1.15,
+      x: 0
+    },
+    xaxis: {
+      tickangle: -30,
+      gridcolor: "rgba(127,127,127,0.15)"
+    },
+    yaxis: {
+      gridcolor: "rgba(127,127,127,0.15)",
+      zeroline: true,
+      zerolinecolor: "rgba(127,127,127,0.25)"
+    }
+  };
+
+  const config = {
+    responsive: true,
+    displayModeBar: false
+  };
+
+  Plotly.newPlot("strava_status_trend_chart", traces, layout, config);
+}
+
 // --------------------
 // Boot
 // --------------------
@@ -584,6 +657,7 @@ document.addEventListener("DOMContentLoaded", () => {
   plotIfExists("hume_mass_chart", loadHumeBody);
   plotIfExists("lbmi_chart", loadLBMI);
   plotIfExists("training_load_chart", loadTrainingLoad);
+  plotIfExists("strava_status_trend_chart", renderStravaStatusTrend);
 
   if (document.getElementById("form_metric")) {
     loadFormMetric();

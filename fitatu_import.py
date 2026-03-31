@@ -12,7 +12,7 @@ import pandas as pd
 
 # Pas aan als je DB elders staat
 DB_PATH = os.path.expanduser(
-    "/home/gba/Documenten/PycharmProjects/health_monitor/garmin.sqlite"
+    "/home/gba/Documenten/PycharmProjects/health_monitor/health.sqlite"
 )
 
 
@@ -23,6 +23,7 @@ COL_PROT = "Eiwitten (g)"
 COL_CARB = "Koolhydraten (g)"
 COL_FAT  = "Vetten (g)"
 COL_FIB  = "Vezels (g)"
+COL_SALT = "Zout (g)"
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -34,6 +35,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         carbs_g REAL,
         fat_g REAL,
         fiber_g REAL,
+        salt_g REAL,
         synced_at TEXT,
         raw_json TEXT
     )
@@ -64,7 +66,7 @@ def import_fitatu(path: str) -> dict:
 
     df = load_csv(path)
 
-    missing = [c for c in (COL_DATE, COL_KCAL, COL_PROT, COL_CARB, COL_FAT, COL_FIB) if c not in df.columns]
+    missing = [c for c in (COL_DATE, COL_KCAL, COL_PROT, COL_CARB, COL_FAT, COL_FIB, COL_SALT) if c not in df.columns]
     if missing:
         raise ValueError(f"CSV columns do not match expected Fitatu export. Missing: {missing}. Found: {list(df.columns)}")
 
@@ -83,9 +85,10 @@ def import_fitatu(path: str) -> dict:
     df[COL_CARB] = to_num_series(df[COL_CARB])
     df[COL_FAT]  = to_num_series(df[COL_FAT])
     df[COL_FIB]  = to_num_series(df[COL_FIB])
+    df[COL_SALT] = to_num_series(df[COL_SALT])
 
     daily = (
-        df.groupby("day", as_index=False)[[COL_KCAL, COL_PROT, COL_CARB, COL_FAT, COL_FIB]]
+        df.groupby("day", as_index=False)[[COL_KCAL, COL_PROT, COL_CARB, COL_FAT, COL_FIB, COL_SALT]]
           .sum()
           .sort_values("day")
     )
@@ -110,12 +113,13 @@ def import_fitatu(path: str) -> dict:
                 "carbs_g": None if pd.isna(r[COL_CARB]) else float(r[COL_CARB]),
                 "fat_g": None if pd.isna(r[COL_FAT]) else float(r[COL_FAT]),
                 "fiber_g": None if pd.isna(r[COL_FIB]) else float(r[COL_FIB]),
+                "salt_g": None if pd.isna(r[COL_SALT]) else float(r[COL_SALT]),
             }
 
             conn.execute("""
                 INSERT OR REPLACE INTO fitatu_daily
-                (day, calories, protein_g, carbs_g, fat_g, fiber_g, synced_at, raw_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (day, calories, protein_g, carbs_g, fat_g, fiber_g, salt_g, synced_at, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 day,
                 payload["calories"],
@@ -123,6 +127,7 @@ def import_fitatu(path: str) -> dict:
                 payload["carbs_g"],
                 payload["fat_g"],
                 payload["fiber_g"],
+                payload["salt_g"],
                 synced_at,
                 json.dumps(payload, ensure_ascii=False),
             ))

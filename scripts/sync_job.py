@@ -29,7 +29,7 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-DB_PATH = os.environ.get("HEALTH_DB") or os.environ.get("DB") or "garmin.sqlite"
+DB_PATH = os.environ.get("HEALTH_DB") or os.environ.get("DB") or "health.sqlite"
 LOCK_PATH = os.environ.get("HEALTH_SYNC_LOCK", "/tmp/health_monitor_sync.lock")
 
 

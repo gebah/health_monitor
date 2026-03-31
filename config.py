@@ -1,5 +1,5 @@
 # config.py
-DB = "/home/gba/Documenten/PycharmProjects/health_monitor/garmin.sqlite"
+DB = "/home/gba/Documenten/PycharmProjects/health_monitor/health.sqlite"
 
 USER_NAME = "Gé"
 USER_HEIGHT = 1.80

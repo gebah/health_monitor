@@ -11,7 +11,7 @@ import io
 app = Flask(__name__)
 app.secret_key = "secret"
 
-DB = "/home/gba/Documenten/PycharmProjects/health_monitor/garmin.sqlite"
+DB = "/home/gba/Documenten/PycharmProjects/health_monitor/health.sqlite"
 
 USER_NAME = "Gé"
 USER_HEIGHT = 1.92
@@ -508,7 +508,7 @@ def get_latest_activities(conn, limit=25, activity_type="all"):
     if activity_type != "all":
         rows = conn.execute("""
             SELECT *
-            FROM activities
+            FROM strava_activities
             WHERE activity_type = ?
             ORDER BY start_time_local DESC
             LIMIT ?
@@ -516,7 +516,7 @@ def get_latest_activities(conn, limit=25, activity_type="all"):
     else:
         rows = conn.execute("""
             SELECT *
-            FROM activities
+            FROM strava_activities
             ORDER BY start_time_local DESC
             LIMIT ?
         """, (limit,)).fetchall()
@@ -530,39 +530,117 @@ def _parse_yyyy_mm_dd(s: str):
 def _ema(loads, tau_days: int):
     if not loads:
         return []
+
     k = 1.0 / float(tau_days)
-    out = []
-    prev = float(loads[0])
-    out.append(prev)
+
+    seed_n = min(len(loads), tau_days)
+    prev = sum(float(x) for x in loads[:seed_n]) / float(seed_n)
+
+    out = [prev]
     for x in loads[1:]:
         x = float(x)
         prev = prev + (x - prev) * k
         out.append(prev)
+
     return out
 
-def get_training_load_today(conn, days_back: int = 120):
+def activity_load(relative_effort=None, weighted_power=None, moving_time_s=None, ftp=None, suffer_score=None):
+    # 1) Prefer Relative Effort if available
+    if relative_effort is not None:
+        try:
+            return float(relative_effort)
+        except (TypeError, ValueError):
+            pass
+
+    # 2) Fallback: TSS-like from weighted power + FTP
+    try:
+        if weighted_power is not None and moving_time_s is not None and ftp and float(ftp) > 0:
+            wp = float(weighted_power)
+            dur_h = float(moving_time_s) / 3600.0
+            if_val = wp / float(ftp)
+            return dur_h * (if_val ** 2) * 100.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        pass
+
+    # 3) Fallback: suffer score
+    if suffer_score is not None:
+        try:
+            return float(suffer_score)
+        except (TypeError, ValueError):
+            pass
+
+    return 0.0
+
+def get_training_load_today(conn, days_back: int = 365):
     """
-    Geeft laatste ATL/CTL/TSB + daily TCL + laatste 2 dagen load.
-    Gebaseerd op strava_activities.tcl en start_time_local.
+    Geeft ATL/CTL/Form op basis van dagelijkse trainingsload.
+    Prioriteit activiteit-load:
+    1. relative_effort
+    2. TSS-like uit weighted power + FTP
+    3. suffer_score
+
+    Geeft ook 'start-of-day' form terug, zodat dashboard beter matcht met
+    hoe Strava/TrainingPeaks freshness vaak voelt vóór de training van vandaag.
     """
+
+    ftp = STRAVA_FTP if 'STRAVA_FTP' in globals() else 0
+
     rows = conn.execute("""
-        SELECT date(start_time_local) AS day, COALESCE(SUM(tcl),0) AS tcl
+        SELECT
+            date(start_time_local) AS day,
+            raw_json,
+            moving_time_s,
+            suffer_score
         FROM strava_activities
         WHERE start_time_local IS NOT NULL
-        GROUP BY day
         ORDER BY day ASC
     """).fetchall()
 
     if not rows:
-        return {"atl": None, "ctl": None, "tsb": None, "tcl_today": None, "tcl_yesterday": None}
+        return {
+            "atl": None,
+            "ctl": None,
+            "tsb": None,
+            "tcl_today": None,
+            "tcl_yesterday": None,
+            "atl_start": None,
+            "ctl_start": None,
+            "tsb_start": None,
+        }
 
-    min_day = _parse_yyyy_mm_dd(rows[0]["day"])
-    max_day = _parse_yyyy_mm_dd(rows[-1]["day"])
+    daily = {}
+
+    for row in rows:
+        day = row["day"]
+        raw = {}
+        try:
+            raw = json.loads(row["raw_json"]) if row["raw_json"] else {}
+        except Exception:
+            raw = {}
+
+        # Try common Strava keys
+        relative_effort = raw.get("relative_effort")
+        weighted_power = (
+            raw.get("weighted_average_watts")
+            or raw.get("weighted_power")
+        )
+
+        load = activity_load(
+            relative_effort=relative_effort,
+            weighted_power=weighted_power,
+            moving_time_s=row["moving_time_s"],
+            ftp=ftp,
+            suffer_score=row["suffer_score"],
+        )
+
+        daily[day] = daily.get(day, 0.0) + load
+
+    days_sorted = sorted(daily.keys())
+    min_day = _parse_yyyy_mm_dd(days_sorted[0])
+    max_day = _parse_yyyy_mm_dd(days_sorted[-1])
 
     end_day = max_day
     start_day = end_day - timedelta(days=days_back - 1)
-
-    tcl_by_day = {r["day"]: float(r["tcl"] or 0) for r in rows}
 
     xs = []
     loads = []
@@ -570,24 +648,149 @@ def get_training_load_today(conn, days_back: int = 120):
     while d <= end_day:
         ds = d.isoformat()
         xs.append(ds)
-        loads.append(tcl_by_day.get(ds, 0.0))
+        loads.append(float(daily.get(ds, 0.0)))
         d += timedelta(days=1)
 
-    atl = _ema(loads, 7)
-    ctl = _ema(loads, 42)
-    tsb = [c - a for c, a in zip(ctl, atl)]
+    atl_series = _ema(loads, 7)
+    ctl_series = _ema(loads, 42)
+    tsb_series = [c - a for c, a in zip(ctl_series, atl_series)]
 
-    # today / yesterday tcl
+    if not atl_series or not ctl_series or not tsb_series:
+        return {
+            "atl": None,
+            "ctl": None,
+            "tsb": None,
+            "tcl_today": None,
+            "tcl_yesterday": None,
+            "atl_start": None,
+            "ctl_start": None,
+            "tsb_start": None,
+        }
+
     tcl_today = loads[-1] if loads else None
     tcl_yesterday = loads[-2] if len(loads) >= 2 else None
 
+    # End-of-day values (na de load van vandaag)
+    atl_end = atl_series[-1]
+    ctl_end = ctl_series[-1]
+    tsb_end = tsb_series[-1]
+
+    # Start-of-day values (vóór de load van vandaag)
+    if len(atl_series) >= 2 and len(ctl_series) >= 2:
+        atl_start = atl_series[-2]
+        ctl_start = ctl_series[-2]
+        tsb_start = ctl_start - atl_start
+    else:
+        atl_start = atl_end
+        ctl_start = ctl_end
+        tsb_start = tsb_end
+
+    # Start-of-day values van gisteren
+    if len(atl_series) >= 3 and len(ctl_series) >= 3:
+        atl_start_prev = atl_series[-3]
+        ctl_start_prev = ctl_series[-3]
+        tsb_start_prev = ctl_start_prev - atl_start_prev
+    else:
+        atl_start_prev = atl_start
+        ctl_start_prev = ctl_start
+        tsb_start_prev = tsb_start
+
     return {
-        "atl": atl[-1] if atl else None,
-        "ctl": ctl[-1] if ctl else None,
-        "tsb": tsb[-1] if tsb else None,
-        "tcl_today": tcl_today,
-        "tcl_yesterday": tcl_yesterday,
+        "atl": round(float(atl_end), 1),
+        "ctl": round(float(ctl_end), 1),
+        "tsb": round(float(tsb_end), 1),
+        "tcl_today": round(float(tcl_today), 1) if tcl_today is not None else None,
+        "tcl_yesterday": round(float(tcl_yesterday), 1) if tcl_yesterday is not None else None,
+
+        "atl_start": round(float(atl_start), 1) if atl_start is not None else None,
+        "ctl_start": round(float(ctl_start), 1) if ctl_start is not None else None,
+        "tsb_start": round(float(tsb_start), 1) if tsb_start is not None else None,
+
+        "atl_start_prev": round(float(atl_start_prev), 1) if atl_start_prev is not None else None,
+        "ctl_start_prev": round(float(ctl_start_prev), 1) if ctl_start_prev is not None else None,
+        "tsb_start_prev": round(float(tsb_start_prev), 1) if tsb_start_prev is not None else None,
     }
+
+def get_training_load_series(conn, days_back: int = 365):
+    ftp = STRAVA_FTP if 'STRAVA_FTP' in globals() else 0
+
+    rows = conn.execute("""
+        SELECT
+            date(start_time_local) AS day,
+            raw_json,
+            moving_time_s,
+            suffer_score
+        FROM strava_activities
+        WHERE start_time_local IS NOT NULL
+        ORDER BY day ASC
+    """).fetchall()
+
+    if not rows:
+        return []
+
+    daily = {}
+
+    for row in rows:
+        day = row["day"]
+        raw = {}
+        try:
+            raw = json.loads(row["raw_json"]) if row["raw_json"] else {}
+        except Exception:
+            raw = {}
+
+        relative_effort = raw.get("relative_effort")
+        weighted_power = (
+            raw.get("weighted_average_watts")
+            or raw.get("weighted_power")
+        )
+
+        load = activity_load(
+            relative_effort=relative_effort,
+            weighted_power=weighted_power,
+            moving_time_s=row["moving_time_s"],
+            ftp=ftp,
+            suffer_score=row["suffer_score"],
+        )
+
+        daily[day] = daily.get(day, 0.0) + load
+
+    days_sorted = sorted(daily.keys())
+    min_day = _parse_yyyy_mm_dd(days_sorted[0])
+    max_day = _parse_yyyy_mm_dd(days_sorted[-1])
+
+    end_day = max_day
+    start_day = end_day - timedelta(days=days_back - 1)
+
+    xs = []
+    loads = []
+    d = start_day
+    while d <= end_day:
+        ds = d.isoformat()
+        xs.append(ds)
+        loads.append(float(daily.get(ds, 0.0)))
+        d += timedelta(days=1)
+
+    atl_series = _ema(loads, 7)
+    ctl_series = _ema(loads, 42)
+
+    CTL_SCALE = 1.60
+    ATL_SCALE = 0.84
+
+    out = []
+    for i, day in enumerate(xs):
+        ctl = float(ctl_series[i]) * CTL_SCALE
+        atl = float(atl_series[i]) * ATL_SCALE
+        tsb = ctl - atl
+
+        out.append({
+            "day": day,
+            "fitness": round(ctl, 1),
+            "fatigue": round(atl, 1),
+            "form": round(tsb, 1),
+            "load": round(loads[i], 1),
+        })
+
+    return out
 
 def get_recovery_flags(conn):
     """
@@ -635,23 +838,194 @@ def _to_float(x):
     except ValueError:
         return None
 
+
+def get_latest_fitatu_week_summary(
+    conn,
+    weekly_kcal_target=17500,
+    protein_target_g_per_day=175,
+    fat_target_g_per_day=100,
+    carbs_target_g_per_day=225,
+    fiber_target_g_per_day=30,
+    salt_target_g_per_day=6,
+):
+    """
+    Maakt een korte tekstsamenvatting van de laatste volledige Fitatu-week.
+    """
+    row = conn.execute("""
+        SELECT
+            date(day, '-' || ((strftime('%w',day) + 6) % 7) || ' days') AS week_start,
+            SUM(calories)  AS kcal_total,
+            SUM(protein_g) AS protein_g,
+            SUM(carbs_g)   AS carbs_g,
+            SUM(fat_g)     AS fat_g,
+            SUM(fiber_g)   AS fiber_g,
+            SUM(COALESCE(salt_g, 0)) AS salt_g,
+            COUNT(*) AS days_logged
+        FROM fitatu_daily
+        WHERE day IS NOT NULL
+        GROUP BY week_start
+        ORDER BY week_start DESC
+        LIMIT 1
+    """).fetchone()
+
+    if not row:
+        return None
+
+    row = dict(row)
+
+    week_start = row["week_start"]
+    if not week_start:
+        return None
+
+    start_dt = datetime.strptime(week_start, "%Y-%m-%d").date()
+    end_dt = start_dt + timedelta(days=6)
+
+    kcal_total = float(row.get("kcal_total") or 0)
+    protein_g = float(row.get("protein_g") or 0)
+    carbs_g = float(row.get("carbs_g") or 0)
+    fat_g = float(row.get("fat_g") or 0)
+    fiber_g = float(row.get("fiber_g") or 0)
+    salt_g = float(row.get("salt_g") or 0)
+    days_logged = int(row.get("days_logged") or 0)
+
+    protein_target_week = protein_target_g_per_day * 7
+    fat_target_week = fat_target_g_per_day * 7
+    carbs_target_week = carbs_target_g_per_day * 7
+    fiber_target_week = fiber_target_g_per_day * 7
+    salt_target_week = salt_target_g_per_day * 7
+
+    kcal_diff = kcal_total - weekly_kcal_target
+    protein_diff = protein_g - protein_target_week
+    carbs_diff = carbs_g - carbs_target_week
+    fat_diff = fat_g - fat_target_week
+    fiber_diff = fiber_g - fiber_target_week
+    salt_diff = salt_g - salt_target_week
+
+    def fmt_diff(value, unit="", decimals=0):
+        if value is None:
+            return "—"
+        if decimals == 0:
+            value_txt = f"{abs(round(value))}"
+        else:
+            value_txt = f"{abs(round(value, decimals))}"
+        sign = "+" if value > 0 else "-" if value < 0 else "±"
+        return f"{sign}{value_txt}{unit}"
+
+
+    def compare(actual, target, lower_is_better=False, margin=0.05):
+        if target <= 0:
+            return "onbekend"
+
+        ratio = actual / target
+
+        if lower_is_better:
+            if ratio <= 1.00:
+                return "goed"
+            elif ratio <= 1.10:
+                return "licht te hoog"
+            else:
+                return "duidelijk te hoog"
+
+        if ratio < 0.95:
+            return "onder doel"
+        elif ratio <= 1.05:
+            return "rond doel"
+        else:
+            return "boven doel"
+
+    kcal_status = compare(kcal_total, weekly_kcal_target)
+    protein_status = compare(protein_g, protein_target_week)
+    fat_status = compare(fat_g, fat_target_week, lower_is_better=True)
+    carbs_status = compare(carbs_g, carbs_target_week)
+    fiber_status = compare(fiber_g, fiber_target_week)
+    salt_status = compare(salt_g, salt_target_week, lower_is_better=True)
+
+    bullets = []
+
+    if kcal_status == "boven doel":
+        bullets.append(f"totaal calorieën overschreden ({fmt_diff(kcal_diff, ' kcal')})")
+    elif kcal_status == "onder doel":
+        bullets.append(f"totaal calorieën onder doel ({fmt_diff(kcal_diff, ' kcal')})")
+    else:
+        bullets.append("calorieën rond doel")
+
+    if fat_status == "licht te hoog":
+        bullets.append(f"vetten licht te hoog ({fmt_diff(fat_diff, ' g')})")
+    elif fat_status == "duidelijk te hoog":
+        bullets.append(f"vetten duidelijk te hoog ({fmt_diff(fat_diff, ' g')})")
+    elif fat_status == "goed":
+        bullets.append("vetten binnen doel")
+
+    if protein_status == "onder doel":
+        bullets.append(f"eiwit onder doel ({fmt_diff(protein_diff, ' g')})")
+    elif protein_status == "rond doel":
+        bullets.append("eiwit rond doel")
+    else:
+        bullets.append(f"eiwit boven doel ({fmt_diff(protein_diff, ' g')})")
+
+    if carbs_status == "onder doel":
+        bullets.append(f"koolhydraten onder doel ({fmt_diff(carbs_diff, ' g')})")
+    elif carbs_status == "rond doel":
+        bullets.append("koolhydraten rond doel")
+    else:
+        bullets.append(f"koolhydraten boven doel ({fmt_diff(carbs_diff, ' g')})")
+
+    if fiber_status == "onder doel":
+        bullets.append(f"vezels onder doel ({fmt_diff(fiber_diff, ' g')})")
+    elif fiber_status == "rond doel":
+        bullets.append("vezels goed")
+    else:
+        bullets.append(f"vezels ruim voldoende ({fmt_diff(fiber_diff, ' g')})")
+
+    if salt_g > 0:
+        if salt_status == "licht te hoog":
+            bullets.append(f"zout licht te hoog ({fmt_diff(salt_diff, ' g', 1)})")
+        elif salt_status == "duidelijk te hoog":
+            bullets.append(f"zout duidelijk te hoog ({fmt_diff(salt_diff, ' g', 1)})")
+        else:
+            bullets.append("zout binnen doel")
+
+    summary_text = f"Week {start_dt.strftime('%d-%m')} t/m {end_dt.strftime('%d-%m')}: " + ", ".join(bullets) + "."
+
+    return {
+        "week_start": week_start,
+        "week_end": end_dt.isoformat(),
+        "days_logged": days_logged,
+        "kcal_total": round(kcal_total),
+        "protein_g": round(protein_g),
+        "carbs_g": round(carbs_g),
+        "fat_g": round(fat_g),
+        "fiber_g": round(fiber_g),
+        "salt_g": round(salt_g, 1),
+
+        "kcal_diff": round(kcal_diff),
+        "protein_diff": round(protein_diff),
+        "carbs_diff": round(carbs_diff),
+        "fat_diff": round(fat_diff),
+        "fiber_diff": round(fiber_diff),
+        "salt_diff": round(salt_diff, 1),
+
+        "summary_text": summary_text,
+    }
+
 def import_fitatu_meal_csv(conn, file_storage) -> dict:
     """
-    Fitatu 'maaltijdplan/maaltijd' CSV:
-    - meerdere regels per dag (producten)
+    Fitatu maaltijd CSV:
+    - meerdere regels per dag
     - aggregeert naar 1 rij per dag in fitatu_daily
     """
+
     raw = file_storage.read()
     text = raw.decode("utf-8-sig", errors="replace")
     reader = csv.DictReader(io.StringIO(text))
 
-    # map CSV kolommen -> jouw fitatu_daily kolommen
     COL_DAY = "Datum"
     COL_KCAL = "calorieën (kcal)"
     COL_P = "Eiwitten (g)"
     COL_C = "Koolhydraten (g)"
     COL_F = "Vetten (g)"
     COL_FIBER = "Vezels (g)"
+    COL_SALT = "Sól (g)"   # pas aan als jouw CSV een andere naam gebruikt
 
     per_day = {}
     bad_rows = 0
@@ -666,32 +1040,49 @@ def import_fitatu_meal_csv(conn, file_storage) -> dict:
         c = _to_float(row.get(COL_C))
         f = _to_float(row.get(COL_F))
         fib = _to_float(row.get(COL_FIBER))
+        salt = _to_float(row.get(COL_SALT))
 
-        # skip echt lege regels
-        if kcal is None and p is None and c is None and f is None and fib is None:
+        if kcal is None and p is None and c is None and f is None and fib is None and salt is None:
             bad_rows += 1
             continue
 
-        d = per_day.setdefault(day, {"calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0, "fiber_g": 0.0})
+        d = per_day.setdefault(day, {
+            "calories": 0.0,
+            "protein_g": 0.0,
+            "carbs_g": 0.0,
+            "fat_g": 0.0,
+            "fiber_g": 0.0,
+            "salt_g": 0.0,
+        })
+
         d["calories"] += kcal or 0.0
         d["protein_g"] += p or 0.0
         d["carbs_g"] += c or 0.0
         d["fat_g"] += f or 0.0
         d["fiber_g"] += fib or 0.0
+        d["salt_g"] += salt or 0.0
 
-    # UPSERT per dag
     upserts = 0
     for day, t in per_day.items():
         conn.execute("""
-            INSERT INTO fitatu_daily(day, calories, protein_g, carbs_g, fat_g, fiber_g)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO fitatu_daily(day, calories, protein_g, carbs_g, fat_g, fiber_g, salt_g)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(day) DO UPDATE SET
               calories=excluded.calories,
               protein_g=excluded.protein_g,
               carbs_g=excluded.carbs_g,
               fat_g=excluded.fat_g,
-              fiber_g=excluded.fiber_g
-        """, (day, t["calories"], t["protein_g"], t["carbs_g"], t["fat_g"], t["fiber_g"]))
+              fiber_g=excluded.fiber_g,
+              salt_g=excluded.salt_g
+        """, (
+            day,
+            t["calories"],
+            t["protein_g"],
+            t["carbs_g"],
+            t["fat_g"],
+            t["fiber_g"],
+            t["salt_g"],
+        ))
         upserts += 1
 
     conn.commit()
@@ -767,53 +1158,142 @@ def get_latest_strava_readiness(conn):
 
     return row
 
-def get_training_advice(readiness_score, tsb, recovery_score=None):
-    readiness_score = float(readiness_score or 0)
-    tsb = float(tsb or 0)
-    recovery_score = None if recovery_score is None else float(recovery_score)
+@app.route("/api/strava_status_trend")
+def api_strava_status_trend():
+    days = int(request.args.get("days", 7))
+    tl = get_training_load_series(get_conn(), days_back=max(days, 365))
 
-    if recovery_score is not None and recovery_score < 40:
-        return {
-            "code": "rest",
-            "label": "Rust",
-            "summary": "Herstel is te laag voor zinvolle trainingsprikkel.",
-            "details": "Kies rust of hooguit wandelen/mobiliteit.",
-            "tone": "bad",
-        }
+    if not tl:
+        return jsonify([])
 
-    if readiness_score >= 75 and tsb >= 5:
-        return {
-            "code": "train_hard",
-            "label": "Hard trainen",
-            "summary": "Je bent fris genoeg voor een intensieve sessie.",
-            "details": "Geschikt voor intervallen of zware training.",
-            "tone": "good",
-        }
+    # Alleen laatste X dagen tonen
+    out = tl[-days:]
+    return jsonify(out)
 
-    if readiness_score >= 60 and tsb >= -10:
+def get_live_strava_status(conn):
+    tl = get_training_load_today(conn, days_back=365)
+
+    ctl_raw = tl.get("ctl_start")
+    atl_raw = tl.get("atl_start")
+    ctl_raw_prev = tl.get("ctl_start_prev")
+    atl_raw_prev = tl.get("atl_start_prev")
+    tcl_today = tl.get("tcl_today")
+
+    if ctl_raw is None or atl_raw is None:
+        return None
+
+    CTL_SCALE = 1.60
+    ATL_SCALE = 0.84
+
+    fitness = float(ctl_raw) * CTL_SCALE
+    fatigue = float(atl_raw) * ATL_SCALE
+    form = fitness - fatigue
+
+    if ctl_raw_prev is not None and atl_raw_prev is not None:
+        fitness_prev = float(ctl_raw_prev) * CTL_SCALE
+        fatigue_prev = float(atl_raw_prev) * ATL_SCALE
+        form_prev = fitness_prev - fatigue_prev
+    else:
+        fitness_prev = fitness
+        fatigue_prev = fatigue
+        form_prev = form
+
+    fitness_delta = fitness - fitness_prev
+    fatigue_delta = fatigue - fatigue_prev
+    form_delta = form - form_prev
+
+    if form >= 20:
+        form_label = "Fresh"
+        form_state = "good"
+    elif form >= 8:
+        form_label = "Ready"
+        form_state = "good"
+    elif form >= -5:
+        form_label = "Balanced"
+        form_state = "ok"
+    elif form >= -15:
+        form_label = "Loaded"
+        form_state = "ok"
+    else:
+        form_label = "Heavy load"
+        form_state = "bad"
+
+    return {
+        "fitness": round(fitness, 1),
+        "fatigue": round(fatigue, 1),
+        "form": round(form, 1),
+        "daily_load": None if tcl_today is None else round(float(tcl_today), 1),
+        "label": form_label,
+        "state": form_state,
+
+        "fitness_delta": round(fitness_delta, 1),
+        "fatigue_delta": round(fatigue_delta, 1),
+        "form_delta": round(form_delta, 1),
+    }
+
+def get_training_advice(form, fitness, fatigue):
+    form = float(form or 0)
+    fitness = float(fitness or 0)
+    fatigue = float(fatigue or 0)
+
+    # Hoofdlogica: Form is leidend
+    if form >= 20 and fatigue > 70:
         return {
             "code": "train_easy",
-            "label": "Normaal trainen",
-            "summary": "Goede dag voor een degelijke training.",
-            "details": "Tempo, duur of gecontroleerde belasting.",
+            "label": "Rustig",
+            "summary": "Je bent fris, maar belasting is al hoog.",
+            "details": "Kies liever een rustige duurtraining i.p.v. maximale intensiteit.",
             "tone": "ok",
+            "score": 55,
+    }
+
+    if form >= 20:
+        return {
+            "code": "train_hard",
+            "label": "Kwaliteit",
+            "summary": "Goede dag voor een stevige training.",
+            "details": "Je vorm is hoog. Geschikt voor intervallen, threshold of een zwaardere sessie.",
+            "tone": "good",
+            "score": 85,
         }
 
-    if readiness_score >= 45 and tsb >= -20:
+    if form >= 8:
+        return {
+            "code": "train_normal",
+            "label": "Normaal",
+            "summary": "Prima dag om normaal te trainen.",
+            "details": "Goede balans tussen fitheid en belasting. Duur, tempo of kracht past hier goed.",
+            "tone": "good",
+            "score": 70,
+        }
+
+    if form >= -5:
+        return {
+            "code": "train_easy",
+            "label": "Rustig",
+            "summary": "Hou het gecontroleerd vandaag.",
+            "details": "Geschikt voor rustige duur, techniek of een lichtere sessie.",
+            "tone": "ok",
+            "score": 50,
+        }
+
+    if form >= -15:
         return {
             "code": "recovery",
-            "label": "Licht herstellen",
-            "summary": "Hou het rustig vandaag.",
-            "details": "Zone 1/2 of hersteltraining.",
+            "label": "Herstel",
+            "summary": "Je trainingsbelasting loopt op.",
+            "details": "Kies herstelduur, wandelen of mobiliteit.",
             "tone": "ok",
+            "score": 35,
         }
 
     return {
         "code": "rest",
         "label": "Rust",
         "summary": "Je systeem vraagt om herstel.",
-        "details": "Neem rust of doe mobiliteit.",
-        "tone": "bad",
+        "details": "Neem rust of doe alleen mobiliteit / heel lichte beweging.",
+        "tone": "ok",
+        "score": 20,
     }
 
 def tsb_to_score(tsb):
@@ -824,43 +1304,6 @@ def tsb_to_score(tsb):
     tsb = max(-30, min(30, float(tsb or 0)))
     return int((tsb + 30) / 60 * 100)
 
-
-# def get_training_advice(tsb, score):
-#     tsb = float(tsb or 0)
-
-#     if tsb <= -25:
-#         return {
-#             "label": "Rust",
-#             "code": "rest",
-#             "summary": "Je systeem vraagt om herstel.",
-#             "details": "Neem rust of doe mobiliteit / wandelen.",
-#             "tone": "bad",
-#         }
-#     if tsb <= -10:
-#         return {
-#             "label": "Herstel",
-#             "code": "recovery",
-#             "summary": "Houd het licht vandaag.",
-#             "details": "Kies zone 1/2 of een korte rustige sessie.",
-#             "tone": "ok",
-#         }
-#     if tsb < 5:
-#         return {
-#             "label": "Normaal",
-#             "code": "easy",
-#             "summary": "Goede dag voor normale training.",
-#             "details": "Prima voor duur, tempo of gecontroleerde kracht.",
-#             "tone": "ok",
-#         }
-
-#     return {
-#         "label": "Klaar om te knallen",
-#         "code": "train",
-#         "summary": "Je bent fris genoeg voor een stevige prikkel.",
-#         "details": "Geschikt voor intervallen of een zwaardere sessie.",
-#         "tone": "good",
-#     }
-    
 @app.route("/")
 def home():
     days = int(request.args.get("days", 30))
@@ -871,26 +1314,14 @@ def home():
         ).fetchone()
         latest = row_to_dict(latest_row)
 
-        tcl_7d = get_tcl_7d(conn)
         tl = get_training_load_today(conn)
-        flags = get_recovery_flags(conn)
-
-        readiness = readiness_score(
-            latest,
-            tcl_7d=tcl_7d,
-            tcl_target_7d=300,
-            tsb=tl.get("tsb"),
-            atl=tl.get("atl"),
-            ctl=tl.get("ctl"),
-            flags=flags
-        )
+        strava_status = get_live_strava_status(conn)
 
         latest_hume_row = conn.execute(
             "SELECT * FROM hume_body ORDER BY day DESC LIMIT 1"
         ).fetchone()
         latest_hume = row_to_dict(latest_hume_row)
 
-        # Zorg dat bodywaarden numeriek zijn
         if latest_hume:
             for key in [
                 "weight_kg",
@@ -901,65 +1332,26 @@ def home():
                 "body_water_pct",
                 "body_cell_mass_kg",
             ]:
-                if key in latest_hume:
-                    latest_hume[key] = to_float(latest_hume.get(key))
+                latest_hume[key] = to_float(latest_hume.get(key))
 
-        history = get_daily_metrics_history(days=28) or []
+        if strava_status:
+            training_advice = get_training_advice(
+                form=strava_status["form"],
+                fitness=strava_status["fitness"],
+                fatigue=strava_status["fatigue"],
+            )
+        else:
+            training_advice = {
+                "code": "unknown",
+                "label": "Onbekend",
+                "summary": "Nog geen Strava load-data beschikbaar.",
+                "details": "Zodra er load-data is, verschijnt hier een advies.",
+                "tone": "ok",
+                "score": None,
+            }
 
-        baseline_hrv = avg_ignore_none([d.get("hrv_rmssd") for d in history[1:]]) if history else None
-        baseline_rhr = avg_ignore_none([d.get("resting_hr") for d in history[1:]]) if history else None
-
-        recovery = calculate_recovery_gauge(
-            latest_hrv=to_float(latest.get("hrv_rmssd")) if latest else None,
-            baseline_hrv=baseline_hrv,
-            sleep_score=to_float(latest.get("sleep_score")) if latest else None,
-            avg_stress=to_float(latest.get("avg_stress")) if latest else None,
-            body_battery_high=to_float(latest.get("body_battery_high")) if latest else None,
-            resting_hr=to_float(latest.get("resting_hr")) if latest else None,
-            baseline_rhr=baseline_rhr,
-            tcl_status=latest.get("tcl_status") if latest else None,
-        )
-
-        strava_readiness = get_latest_strava_readiness(conn)
-
-        tsb_val = strava_readiness.get("form") if strava_readiness else tl.get("tsb")
-        advice_score = tsb_to_score(tsb_val)
-
-        training_advice = get_training_advice(
-            readiness_score=(
-                strava_readiness.get("readiness_score")
-                if strava_readiness else readiness.get("score")
-            ),
-            tsb=tsb_val,
-            recovery_score=(
-                strava_readiness.get("recovery_gauge")
-                if strava_readiness else recovery.get("score")
-            ),
-        )
-        training_advice["score"] = advice_score
-
-        cache_set(conn, "readiness_header", {
-            "score": readiness.get("score"),
-            "label": readiness.get("label"),
-            "icon": readiness.get("icon"),
-            "tone": readiness.get("tone"),
-            "state": readiness.get("state"),
-            "why": readiness.get("why"),
-        })
-
-    # Veilig body block
     safe_hume = latest_hume or {}
-    
-    if latest_hume:
-        latest_hume = dict(latest_hume)
-        for key in ["weight_kg", "lean_mass_kg", "body_fat_pct"]:
-            value = latest_hume.get(key)
-            if value is not None:
-                try:
-                    latest_hume[key] = float(str(value).replace(",", "."))
-                except (TypeError, ValueError):
-                    latest_hume[key] = None
-              
+
     deltas = calc_body_deltas(
         safe_hume,
         target_weight=90,
@@ -977,92 +1369,56 @@ def home():
     lbmi_display = round(lbmi, 2) if lbmi is not None else None
     delta_lbmi_display = round(delta_lbmi, 2) if delta_lbmi is not None else None
 
-    load_label = (
-        f"{strava_readiness.get('daily_load'):.0f} TCL"
-        if strava_readiness and strava_readiness.get("daily_load") is not None
-        else ((latest.get("tcl_status") or "-") if latest else "-")
-    )
-
-    tcl_status = str((latest or {}).get("tcl_status", "")).strip().lower()
-
-    load_state = (
-        strava_readiness.get("state")
-        if strava_readiness else
-        "rest" if tcl_status in {"fatigued", "vermoeid", "very_fatigued", "zeer_vermoeid"}
-        else "easy" if tcl_status in {"loaded"}
-        else "train" if tcl_status in {"fresh", "balanced", "productive"}
-        else "unknown"
-    )
-
-    load_score = (
-        strava_readiness.get("daily_load")
-        if strava_readiness
-        else to_float(latest.get("tcl")) if latest else None
-    )
-
     home_status = {
-        "recovery": {
-            "label": (
-                strava_readiness.get("form_label")
-                if strava_readiness else recovery.get("label", "-")
-            ),
-            "state": (
-                strava_readiness.get("state")
-                if strava_readiness else recovery.get("state", "unknown")
-            ),
-            "score": (
-                strava_readiness.get("recovery_gauge")
-                if strava_readiness else recovery.get("score")
-            ),
-        },
-        "readiness": {
-            "label": (
-                strava_readiness.get("label")
-                if strava_readiness else readiness.get("label", "-")
-            ),
-            "state": (
-                strava_readiness.get("state")
-                if strava_readiness else readiness.get("state", "unknown")
-            ),
-            "score": (
-                strava_readiness.get("readiness_score")
-                if strava_readiness else readiness.get("score")
-            ),
-        },
-        "load": {
-            "label": load_label,
-            "state": load_state,
-            "score": load_score,
-        },
         "advice": {
             "label": training_advice["label"],
-            "state": training_advice["code"],
-            "score": training_advice["score"],
-        }
+            "state": training_advice["tone"],
+            "score": training_advice.get("score"),
+        },
+        "form": {
+            "label": strava_status["label"] if strava_status else "-",
+            "state": strava_status["state"] if strava_status else "unknown",
+            "score": strava_status["form"] if strava_status else None,
+        },
+        "fitness": {
+            "label": "Fitness",
+            "state": "good",
+            "score": strava_status["fitness"] if strava_status else None,
+        },
+        "fatigue": {
+            "label": "Vermoeidheid",
+            "state": "ok",
+            "score": strava_status["fatigue"] if strava_status else None,
+        },
     }
+
+    cache_set(conn, "readiness_header", {
+            "score": training_advice.get("score"),
+            "label": training_advice.get("label"),
+            "icon": None,
+            "tone": training_advice.get("tone"),
+            "state": training_advice.get("code"),
+            "why": training_advice.get("summary"),
+    })
 
     return render_template(
         "home.html",
         active_page="home",
         days=days,
-        latest=latest,
-        readiness=readiness,
-        readiness_score=readiness["score"],
-        strava_readiness=strava_readiness,
-        USER_NAME=USER_NAME,
-        USER_HEIGHT=USER_HEIGHT,
         latest_hume=latest_hume,
         delta_weight=delta_weight,
         delta_lean=delta_lean,
         delta_bf=delta_bf,
         lbmi_display=lbmi_display,
         delta_lbmi_display=delta_lbmi_display,
-        recovery=recovery,
         home_status=home_status,
         training_advice=training_advice,
-        advice_score=advice_score,
+        advice_score=training_advice.get("score"),
+        strava_status=strava_status,
+        USER_NAME=USER_NAME,
+        USER_HEIGHT=USER_HEIGHT,
     )
-
+    
 
 @app.route("/hume/charts")
 def hume_charts():
@@ -1089,23 +1445,89 @@ def activities_page():
     activity_type = request.args.get("type", "all")
 
     with get_conn() as conn:
-        types = [r["t"] for r in conn.execute("""
-            SELECT DISTINCT activity_type AS t
-            FROM activities
-            WHERE activity_type IS NOT NULL AND activity_type != ''
-            ORDER BY t
-        """).fetchall()]
-        latest_activities = get_latest_activities(conn, limit=act_limit, activity_type=activity_type)
+        if activity_type != "all":
+            latest_activities = conn.execute("""
+                SELECT
+                    strava_activity_id AS activity_id,
+                    start_time_local,
+                    type AS activity_type,
+                    name AS activity_name,
+                    distance_m,
+                    moving_time_s AS duration_s,
+                    NULL AS avg_hr,
+                    NULL AS max_hr,
+                    NULL AS avg_power,
+                    NULL AS training_effect,
+                    NULL AS vo2max_value,
+                    suffer_score,
+                    tcl
+                FROM strava_activities
+                WHERE type = ?
+                ORDER BY start_time_local DESC
+                LIMIT ?
+            """, (activity_type, act_limit)).fetchall()
+        else:
+            latest_activities = conn.execute("""
+                SELECT
+                    strava_activity_id AS activity_id,
+                    start_time_local,
+                    type AS activity_type,
+                    name AS activity_name,
+                    distance_m,
+                    moving_time_s AS duration_s,
+                    NULL AS avg_hr,
+                    NULL AS max_hr,
+                    NULL AS avg_power,
+                    NULL AS training_effect,
+                    NULL AS vo2max_value,
+                    suffer_score,
+                    tcl
+                FROM strava_activities
+                ORDER BY start_time_local DESC
+                LIMIT ?
+            """, (act_limit,)).fetchall()
+
+        types = [
+            r["t"] for r in conn.execute("""
+                SELECT DISTINCT type AS t
+                FROM strava_activities
+                WHERE type IS NOT NULL AND type != ''
+                ORDER BY t
+            """).fetchall()
+        ]
 
     return render_template(
         "activities.html",
         active_page="activities",
-        latest_activities=latest_activities,
+        latest_activities=[dict(r) for r in latest_activities],
         types=types,
         act_limit=act_limit,
-        activity_type=activity_type
+        activity_type=activity_type,
     )
 
+@app.route("/api/activities")
+def api_activities():
+    limit = int(request.args.get("acts", request.args.get("limit", 25)))
+    activity_type = request.args.get("type", "all")
+
+    with get_conn() as conn:
+        if activity_type != "all":
+            rows = conn.execute("""
+                SELECT *
+                FROM strava_activities
+                WHERE type = ?
+                ORDER BY start_time_local DESC
+                LIMIT ?
+            """, (activity_type, limit)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT *
+                FROM strava_activities
+                ORDER BY start_time_local DESC
+                LIMIT ?
+            """, (limit,)).fetchall()
+
+    return jsonify([dict(r) for r in rows])
 
 @app.route("/api/daily_metrics")
 def api_daily():
@@ -1177,39 +1599,16 @@ def api_fitatu_weekly():
     return jsonify(out)
 
 
-@app.route("/api/activities")
-def api_activities():
-    limit = int(request.args.get("acts", request.args.get("limit", 25)))
-    activity_type = request.args.get("type", "all")
-    conn = get_conn()
-
-    if activity_type != "all":
-        rows = conn.execute("""
-            SELECT *
-            FROM activities
-            WHERE activity_type = ?
-            ORDER BY start_time_local DESC
-            LIMIT ?
-        """, (activity_type, limit)).fetchall()
-    else:
-        rows = conn.execute("""
-            SELECT *
-            FROM activities
-            ORDER BY start_time_local DESC
-            LIMIT ?
-        """, (limit,)).fetchall()
-
-    return jsonify([dict(r) for r in rows])
-
 @app.route("/api/activity_types")
 def api_activity_types():
-    conn = get_conn()
-    rows = conn.execute("""
-        SELECT DISTINCT activity_type AS t
-        FROM activities
-        WHERE activity_type IS NOT NULL AND activity_type != ''
-        ORDER BY t
-    """).fetchall()
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT DISTINCT type AS t
+            FROM strava_activities
+            WHERE type IS NOT NULL AND type != ''
+            ORDER BY t
+        """).fetchall()
+
     return jsonify([r["t"] for r in rows])
 
 
@@ -1465,7 +1864,6 @@ def fitatu():
         with get_conn() as conn:
             stats = import_fitatu_meal_csv(conn, f)
 
-            # extra check: wat is nu de laatste dag in de DB?
             last = conn.execute("SELECT MAX(day) AS max_day FROM fitatu_daily").fetchone()
             last_day = last["max_day"] if last else None
 
@@ -1476,7 +1874,6 @@ def fitatu():
         )
         return redirect(url_for("fitatu"))
 
-    # Optioneel: toon laatste entries in de pagina (handig om te zien dat import gelukt is)
     with get_conn() as conn:
         entries = conn.execute("""
             SELECT day, calories, protein_g, carbs_g, fat_g, fiber_g
@@ -1485,7 +1882,25 @@ def fitatu():
             LIMIT 31
         """).fetchall()
 
-    return render_template("fitatu.html", active_page="fitatu", days=180, weekly_kcal_target=17500)
+        weekly_summary = get_latest_fitatu_week_summary(
+            conn,
+            weekly_kcal_target=17500,
+            protein_target_g_per_day=175,
+            fat_target_g_per_day=100,
+            carbs_target_g_per_day=225,
+            fiber_target_g_per_day=30,
+            salt_target_g_per_day=6,
+        )
+
+    return render_template(
+        "fitatu.html",
+        active_page="fitatu",
+        days=180,
+        weekly_kcal_target=17500,
+        entries=entries,
+        weekly_summary=weekly_summary,
+    )
+
 
 
 if __name__ == "__main__":

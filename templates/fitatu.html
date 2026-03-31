@@ -9,6 +9,58 @@ data-weekly-kcal-target="{{ weekly_kcal_target }}"
 {% block content %}
 <h1>Fitatu</h1>
 
+
+{% if weekly_summary %}
+  <div class="card">
+    <div class="card__header">
+      <h3>Weeksamenvatting</h3>
+    </div>
+    <div class="card__body">
+      <p style="margin-top:0; font-size:16px; line-height:1.5;">
+        {{ weekly_summary.summary_text }}
+      </p>
+
+      <div class="metrics-grid">
+        <div class="metric-box">
+          <div class="metric-box__label">Calorieën</div>
+          <div class="metric-box__value">{{ weekly_summary.kcal_total }}</div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Eiwit</div>
+          <div class="metric-box__value">{{ weekly_summary.protein_g }} g</div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Koolhydraten</div>
+          <div class="metric-box__value">{{ weekly_summary.carbs_g }} g</div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Vet</div>
+          <div class="metric-box__value">{{ weekly_summary.fat_g }} g</div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Vezels</div>
+          <div class="metric-box__value">{{ weekly_summary.fiber_g }} g</div>
+        </div>
+
+        <div class="metric-box">
+          <div class="metric-box__label">Zout</div>
+          <div class="metric-box__value">
+            {% if weekly_summary.salt_g %}
+              {{ weekly_summary.salt_g }} g
+            {% else %}
+              —
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
 <div class="card">
   <b>Fitatu import</b>
   <form method="post" enctype="multipart/form-data" class="mt10">
@@ -22,6 +74,7 @@ data-weekly-kcal-target="{{ weekly_kcal_target }}"
   <div id="fitatu_weekly_chart" class="chart-lg"></div>
 </div>
 {% endblock %}
+
 
 {% block scripts %}
 <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
