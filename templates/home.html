@@ -47,6 +47,32 @@ data-weekly-kcal-target="17500"
   </div>
 </div>
 
+<div class="card coach-card coach-card--{{ coach_insight.tone }}">
+  <div class="card__header">
+    <h3>Coach insight</h3>
+    <span class="badge badge--{{ coach_insight.tone }}">{{ coach_insight.tone }}</span>
+  </div>
+
+  <div class="card__body">
+    <div class="coach-insight">
+      <div class="coach-insight__block">
+        <div class="coach-insight__label">Belangrijkste observatie</div>
+        <div class="coach-insight__text">{{ coach_insight.headline }}</div>
+      </div>
+
+      <div class="coach-insight__block">
+        <div class="coach-insight__label">Trend van de week</div>
+        <div class="coach-insight__text">{{ coach_insight.trend }}</div>
+      </div>
+
+      <div class="coach-insight__block">
+        <div class="coach-insight__label">Advies voor nu</div>
+        <div class="coach-insight__text">{{ coach_insight.advice }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="grid2--top">
   <div class="card">
     <div class="card__header">
@@ -141,23 +167,7 @@ data-weekly-kcal-target="17500"
         <div class="card__header">
           <h3>Hume</h3>
         </div>
-        <div class="card__body">
-          {% if hume_summary %}
-          <div class="hume-summary">
-            <strong>Laatste week:</strong>
-
-            {% if hume_summary["weight_delta"] is not none %}
-            {{ hume_summary["weight_delta"] | round(1) | abs }} kg
-            {% if hume_summary["weight_delta"] < 0 %}lager{% else %}hoger{% endif %} dan vorige week {% endif %} {% if
-              hume_summary["bf_delta"] is not none %} , vet {{ hume_summary["bf_delta"] | round(1) | abs }}% {% if
-              hume_summary["bf_delta"] < 0 %}lager{% else %}hoger{% endif %} {% endif %} {% if
-              hume_summary["water_delta"] is not none %} , vocht {{ hume_summary["water_delta"] | round(1) | abs }}% {%
-              if hume_summary["water_delta"]> 0 %}hoger{% else %}lager{% endif %}
-              {% endif %}
-              .
-          </div>
-          {% endif %}
-          
+        <div class="card__body">         
           {% if latest_hume %}
           <div class="metrics-grid">
             <div class="metric-box">

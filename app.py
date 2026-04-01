@@ -1359,8 +1359,87 @@ def get_hume_weekly_summary(conn):
         "current": current,
         "previous": previous,
     }
+    
+def build_coach_insight(hume_summary=None, readiness_header=None, strava_status=None):
+    insight = {
+        "headline": "Nog onvoldoende data voor een duidelijke analyse.",
+        "trend": "Er is al wel data aanwezig, maar nog niet genoeg samenhang voor een sterke interpretatie.",
+        "advice": "Blijf consistent meten, eten en trainen.",
+        "tone": "unknown",
+    }
 
+    if not hume_summary and not readiness_header and not strava_status:
+        return insight
 
+    weight_delta = hume_summary.get("weight_delta") if isinstance(hume_summary, dict) else None
+    bf_delta = hume_summary.get("bf_delta") if isinstance(hume_summary, dict) else None
+    lean_delta = hume_summary.get("lean_delta") if isinstance(hume_summary, dict) else None
+    muscle_delta = hume_summary.get("muscle_delta") if isinstance(hume_summary, dict) else None
+    visceral_delta = hume_summary.get("visceral_delta") if isinstance(hume_summary, dict) else None
+
+    readiness_score_value = None
+    if isinstance(readiness_header, dict):
+        readiness_score_value = readiness_header.get("score")
+
+    fitness_delta = strava_status.get("fitness_delta") if isinstance(strava_status, dict) else None
+    fatigue_delta = strava_status.get("fatigue_delta") if isinstance(strava_status, dict) else None
+    form_value = strava_status.get("form") if isinstance(strava_status, dict) else None
+
+    if bf_delta is not None and bf_delta < 0 and lean_delta is not None and lean_delta >= -0.2:
+        insight["headline"] = "Je lichaamssamenstelling beweegt de goede kant op: vet daalt terwijl lean mass redelijk stabiel blijft."
+        insight["tone"] = "good"
+
+    elif visceral_delta is not None and visceral_delta < 0:
+        insight["headline"] = "Je Hume-data laat een gunstige ontwikkeling zien, met onder meer een daling van het visceraal vet."
+        insight["tone"] = "good"
+
+    elif muscle_delta is not None and muscle_delta > 0 and bf_delta is not None and bf_delta <= 0:
+        insight["headline"] = "Spiermassa houdt goed stand terwijl vet niet oploopt. Dat wijst op een nette fase van behoud of recompositie."
+        insight["tone"] = "good"
+
+    elif weight_delta is not None and weight_delta < 0 and lean_delta is not None and lean_delta < -0.3:
+        insight["headline"] = "Je gewicht daalt, maar ook lean mass loopt mee terug. Dat kan wijzen op een wat agressieve fase."
+        insight["tone"] = "ok"
+
+    elif weight_delta is not None and weight_delta > 0 and bf_delta is not None and bf_delta <= 0:
+        insight["headline"] = "Je gewicht ligt iets hoger, maar vet stijgt niet mee. Dat past eerder bij vocht- of glycogeenschommeling dan bij echte terugval."
+        insight["tone"] = "ok"
+
+    elif weight_delta is not None and abs(weight_delta) < 0.2 and bf_delta is not None and bf_delta < 0:
+        insight["headline"] = "Je gewicht is vrij stabiel, maar je vetpercentage daalt wel. Dat past goed bij recompositie."
+        insight["tone"] = "good"
+
+    if readiness_score_value is not None and fatigue_delta is not None and fitness_delta is not None:
+        if readiness_score_value < 55 and fatigue_delta > 0 and fitness_delta <= fatigue_delta:
+            insight["trend"] = "Je trainingsbelasting loopt op terwijl je readiness relatief laag blijft. Herstel vraagt nu extra aandacht."
+            if insight["tone"] == "unknown":
+                insight["tone"] = "ok"
+        elif readiness_score_value >= 70 and fitness_delta >= 0:
+            insight["trend"] = "Je readiness is degelijk en je fitness houdt goed stand. Dat is een prima basis om gecontroleerd door te bouwen."
+            if insight["tone"] == "unknown":
+                insight["tone"] = "good"
+        elif form_value is not None and form_value < -10:
+            insight["trend"] = "Je vorm staat nog behoorlijk onder druk. Dat hoeft niet verkeerd te zijn, maar het vraagt wel om gecontroleerde belasting."
+            if insight["tone"] == "unknown":
+                insight["tone"] = "ok"
+        else:
+            insight["trend"] = "De combinatie van Hume-, readiness- en trainingsdata oogt redelijk stabiel, zonder grote alarmsignalen."
+            if insight["tone"] == "unknown":
+                insight["tone"] = "good"
+    elif isinstance(hume_summary, dict):
+        insight["trend"] = "Je Hume-data laat duidelijke beweging zien, maar met extra trainings- en readiness-context wordt de analyse nog sterker."
+
+    if insight["tone"] == "good":
+        insight["advice"] = "Blijf vooral consistent in voeding, training en herstel. Dit is een fase om rustig rendement te blijven pakken."
+    elif readiness_score_value is not None and readiness_score_value < 55:
+        insight["advice"] = "Houd je training gecontroleerd en voorkom dat vermoeidheid sneller oploopt dan je herstel aankan."
+    elif lean_delta is not None and lean_delta < -0.3:
+        insight["advice"] = "Let extra op herstel, eiwitinname en trainingskwaliteit, zodat gewichtsverlies niet te veel ten koste gaat van lean mass."
+    else:
+        insight["advice"] = "Blijf de trend nog even volgen en stuur vooral op herstelkwaliteit, eiwitinname en trainingsdosering."
+
+    return insight    
+    
 @app.route("/")
 def home():
     days = int(request.args.get("days", 30))
@@ -1372,6 +1451,7 @@ def home():
         latest = row_to_dict(latest_row)
 
         tl = get_training_load_today(conn)
+        tcl_7d = get_tcl_7d(conn)
         strava_status = get_live_strava_status(conn)
 
         latest_hume_row = conn.execute(
@@ -1407,6 +1487,30 @@ def home():
                 "score": None,
             }
 
+        readiness = readiness_score(
+            latest,
+            tcl_7d=tcl_7d,
+            tcl_target_7d=300,
+            tsb=tl.get("tsb"),
+        ) if latest else {}
+
+        hume_summary = get_hume_weekly_summary(conn)
+
+        cache_set(conn, "readiness_header", {
+            "score": training_advice.get("score"),
+            "label": training_advice.get("label"),
+            "icon": None,
+            "tone": training_advice.get("tone"),
+            "state": training_advice.get("code"),
+            "why": training_advice.get("summary"),
+        })
+
+        coach_insight = build_coach_insight(
+            hume_summary=hume_summary,
+            readiness_header=readiness,
+            strava_status=strava_status,
+        )
+
     safe_hume = latest_hume or {}
 
     deltas = calc_body_deltas(
@@ -1422,7 +1526,7 @@ def home():
     delta_bf = deltas.get("delta_bf")
     lbmi = deltas.get("lbmi")
     delta_lbmi = deltas.get("delta_lbmi")
-    
+
     lbmi_display = round(lbmi, 2) if lbmi is not None else None
     delta_lbmi_display = round(delta_lbmi, 2) if delta_lbmi is not None else None
 
@@ -1449,15 +1553,6 @@ def home():
         },
     }
 
-    cache_set(conn, "readiness_header", {
-            "score": training_advice.get("score"),
-            "label": training_advice.get("label"),
-            "icon": None,
-            "tone": training_advice.get("tone"),
-            "state": training_advice.get("code"),
-            "why": training_advice.get("summary"),
-    })
-
     return render_template(
         "home.html",
         active_page="home",
@@ -1474,8 +1569,11 @@ def home():
         strava_status=strava_status,
         USER_NAME=USER_NAME,
         USER_HEIGHT=USER_HEIGHT,
+        hume_summary=hume_summary,
+        coach_insight=coach_insight,
     )
-    
+
+
 
 @app.route("/hume/charts")
 def hume_charts():

@@ -1358,3 +1358,50 @@ html[data-theme="dark"] .dial {
   font-size: 14px;
   color: var(--text);
 }
+
+.coach-card{
+  margin-bottom:18px;
+}
+
+.coach-insight{
+  display:grid;
+  gap:14px;
+}
+
+.coach-insight__block{
+  padding:14px 16px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:var(--panel-2);
+}
+
+.coach-insight__label{
+  font-size:12px;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+
+.coach-insight__text{
+  font-size:15px;
+  line-height:1.55;
+  color:var(--text);
+}
+
+.coach-card--good{
+  border-color:rgba(34,197,94,.25);
+}
+
+.coach-card--ok{
+  border-color:rgba(245,158,11,.25);
+}
+
+.coach-card--bad{
+  border-color:rgba(239,68,68,.25);
+}
+
+.coach-card--unknown{
+  border-color:var(--border);
+}
