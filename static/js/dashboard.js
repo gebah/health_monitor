@@ -44,7 +44,7 @@ function hexToRgba(hex, a = 0.12) {
 
 function tsbMeta(tsb) {
   if (tsb >= 10) return { tone: "good", label: "Race-ready" };
-  if (tsb >= 0)  return { tone: "good", label: "Fresh" };
+  if (tsb >= 0) return { tone: "good", label: "Fresh" };
   if (tsb >= -10) return { tone: "ok", label: "Normal" };
   if (tsb >= -25) return { tone: "ok", label: "Heavy" };
   return { tone: "bad", label: "Too much" };
@@ -135,7 +135,7 @@ async function loadTrends() {
 
   Plotly.newPlot("bb_chart", [
     { x, y: bbHigh, mode: "lines", name: "High" },
-    { x, y: bbLow,  mode: "lines", name: "Low", fill: "tonexty" }
+    { x, y: bbLow, mode: "lines", name: "Low", fill: "tonexty" }
   ], { ...baseLayout, yaxis: { title: "Body Battery" } }, { responsive: true });
 }
 
@@ -148,7 +148,7 @@ async function loadActivityTrends() {
 
   const x = rows.map(r => r.start_time_local);
   const vo2 = rows.map(r => toNum(r.vo2max_value));
-  const te  = rows.map(r => toNum(r.training_effect));
+  const te = rows.map(r => toNum(r.training_effect));
 
   const layout = {
     margin: { t: 10, r: 10, b: 40, l: 50 },
@@ -215,8 +215,10 @@ async function loadFitatuWeekly() {
       { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: weeklyKcalTarget, y1: weeklyKcalTarget, line: { width: 2, dash: "dash" } }
     ],
     annotations: [
-      { xref: "paper", x: 1, xanchor: "right", yref: "y", y: weeklyKcalTarget, yanchor: "bottom", showarrow: false,
-        text: "Target: 2500 kcal/dag (17.500/week)" }
+      {
+        xref: "paper", x: 1, xanchor: "right", yref: "y", y: weeklyKcalTarget, yanchor: "bottom", showarrow: false,
+        text: "Target: 2500 kcal/dag (17.500/week)"
+      }
     ]
   }, { responsive: true });
 }
@@ -247,7 +249,7 @@ async function loadProAnalysis() {
   const sumEl = document.getElementById("pro_summary");
   if (sumEl) {
     sumEl.textContent = lastW ? `Laatste week: gewicht ~${Number(lastW.weight_avg).toFixed(1)} kg • richtpunt 2500 kcal/dag`
-                              : "Nog geen Hume gewicht in de gekozen periode.";
+      : "Nog geen Hume gewicht in de gekozen periode.";
   }
 
   Plotly.newPlot("pro_analysis_chart", [
@@ -277,13 +279,13 @@ async function loadHumeBody() {
   const x = rows.map(r => r.day);
 
   const weight = rows.map(r => toNum(r.weight_kg));
-  const lean   = rows.map(r => toNum(r.lean_mass_kg));
-  const bcm    = rows.map(r => toNum(r.body_cell_mass_kg));
+  const lean = rows.map(r => toNum(r.lean_mass_kg));
+  const bcm = rows.map(r => toNum(r.body_cell_mass_kg));
   const muscle = rows.map(r => toNum(r.muscle_mass_kg));
 
-  const bf      = rows.map(r => toNum(r.body_fat_pct));
-  const water   = rows.map(r => toNum(r.body_water_pct));
-  const visceral= rows.map(r => toNum(r.visceral_fat_index));
+  const bf = rows.map(r => toNum(r.body_fat_pct));
+  const water = rows.map(r => toNum(r.body_water_pct));
+  const visceral = rows.map(r => toNum(r.visceral_fat_index));
 
   const baseLayout = {
     height: 380,
@@ -296,8 +298,8 @@ async function loadHumeBody() {
 
   const kgTraces = [
     { x, y: weight, mode: "lines+markers", name: "Weight (kg)" },
-    { x, y: lean,   mode: "lines+markers", name: "Lean mass (kg)" },
-    { x, y: bcm,    mode: "lines+markers", name: "BCM (kg)" },
+    { x, y: lean, mode: "lines+markers", name: "Lean mass (kg)" },
+    { x, y: bcm, mode: "lines+markers", name: "BCM (kg)" },
   ];
   if (muscle.some(v => v !== null)) {
     kgTraces.push({ x, y: muscle, mode: "lines+markers", name: "Muscle mass (kg)" });
@@ -308,11 +310,11 @@ async function loadHumeBody() {
     yaxis: { title: "kg" },
     shapes: [
       { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: targetWeight, y1: targetWeight, line: { width: 2, dash: "dash" } },
-      { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: targetLean,   y1: targetLean,   line: { width: 2, dash: "dash" } },
+      { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: targetLean, y1: targetLean, line: { width: 2, dash: "dash" } },
     ],
     annotations: [
       { xref: "paper", x: 1, xanchor: "right", yref: "y", y: targetWeight, yanchor: "bottom", showarrow: false, text: `Target gewicht: ${targetWeight}` },
-      { xref: "paper", x: 1, xanchor: "right", yref: "y", y: targetLean,   yanchor: "bottom", showarrow: false, text: `Target lean: ${targetLean}` },
+      { xref: "paper", x: 1, xanchor: "right", yref: "y", y: targetLean, yanchor: "bottom", showarrow: false, text: `Target lean: ${targetLean}` },
     ]
   }, { responsive: true });
 
@@ -399,16 +401,16 @@ async function loadTrainingLoad() {
 
   const todayColor =
     tsbToday >= 0 ? GOOD :
-    tsbToday >= -10 ? OK :
-    BAD;
-  
+      tsbToday >= -10 ? OK :
+        BAD;
+
   // Zones (TrainingPeaks-achtig)
   const zones = [
-    { y0: 10,  y1: 25,  label: "Race-ready", color: hexToRgba(GOOD, 0.14) },
-    { y0: 0,   y1: 10,  label: "Fresh",      color: hexToRgba(GOOD, 0.10) },
-    { y0: -10, y1: 0,   label: "Normal",     color: hexToRgba(OK,   0.10) },
-    { y0: -25, y1: -10, label: "Heavy",      color: hexToRgba(OK,   0.14) },
-    { y0: -60, y1: -25, label: "Too much",   color: hexToRgba(BAD,  0.14) },
+    { y0: 10, y1: 25, label: "Race-ready", color: hexToRgba(GOOD, 0.14) },
+    { y0: 0, y1: 10, label: "Fresh", color: hexToRgba(GOOD, 0.10) },
+    { y0: -10, y1: 0, label: "Normal", color: hexToRgba(OK, 0.10) },
+    { y0: -25, y1: -10, label: "Heavy", color: hexToRgba(OK, 0.14) },
+    { y0: -60, y1: -25, label: "Too much", color: hexToRgba(BAD, 0.14) },
   ];
 
   // shapes: achtergrondbanden op yaxis2 (TSB)

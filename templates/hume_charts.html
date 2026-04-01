@@ -12,6 +12,42 @@ data-target-bf="17.5"
 {% block content %}
 <h1>Hume</h1>
 
+{% if hume_summary %}
+  <div class="hume-summary">
+    <div class="card__header">
+      <h3>Samenvatting afgelopen week:</h3>
+    </div>
+
+    {% if hume_summary["weight_delta"] is not none %}
+      Gewicht {{ hume_summary["weight_delta"] | round(1) | abs }} kg
+      {% if hume_summary["weight_delta"] < 0 %}lager{% else %}hoger{% endif %}
+      dan vorige week
+    {% endif %}
+
+    {% if hume_summary["bf_delta"] is not none %}
+      , vet {{ hume_summary["bf_delta"] | round(1) | abs }}%
+      {% if hume_summary["bf_delta"] < 0 %}lager{% else %}hoger{% endif %}
+    {% endif %}
+
+    {% if hume_summary["mm_delta"] is not none %}
+      , muscle mass {{ hume_summary["mm_delta"] | round(1) | abs }}%
+      {% if hume_summary["mm_delta"] > 0 %}hoger{% else %}lager{% endif %}
+    {% endif %}
+
+    {% if hume_summary["lm_delta"] is not none %}
+      , lean mass {{ hume_summary["lm_delta"] | round(1) | abs }}%
+      {% if hume_summary["lm_delta"] > 0 %}hoger{% else %}lager{% endif %}
+    {% endif %}
+
+    {% if hume_summary["vf_delta"] is not none %}
+      , visceraal vet {{ hume_summary["vf_delta"] | round(1) | abs }}%
+      {% if hume_summary["vf_delta"] > 0 %}hoger{% else %}lager{% endif %}
+    {% endif %}
+    .
+  </div>
+{% endif %}
+
+
 <div class="grid2">
   <div class="card chart-card"><b>Hume – Mass (kg)</b><div id="hume_mass_chart" class="chart-lg"></div></div>
   <div class="card chart-card"><b>Hume – Composition</b><div id="hume_comp_chart" class="chart-lg"></div></div>

@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="nl" data-theme="dark">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,104 +11,112 @@
 
 <body {% block body_attrs %}{% endblock %}>
 
-<div class="layout">
-  <!-- Sidebar -->
-  <aside class="sidebar">
-    <div class="sidebar__brand">Health Monitor</div>
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar__brand">Health Monitor</div>
 
-    <nav class="snav">
-      <a class="snav__item {% if active_page=='home' %}is-active{% endif %}" href="{{ url_for('home') }}">Home</a>
-      <a class="snav__item {% if active_page=='hume_charts' %}is-active{% endif %}" href="{{ url_for('hume_charts') }}">Hume charts</a> 
-      <a class="snav__item {% if active_page=='fitatu' %}is-active{% endif %}" href="{{ url_for('fitatu') }}">Fitatu</a>
-      {# <a class="snav__item {% if active_page=='trends' %}is-active{% endif %}" href="{{ url_for('trends') }}">Trends</a> #}
-      <a class="snav__item {% if active_page=='training_load' %}is-active{% endif %}" href="{{ url_for('training_load_page') }}">Training Load</a>
-      <a class="snav__item {% if active_page=='activities' %}is-active{% endif %}" href="{{ url_for('activities_page') }}">Activities</a>
+      <nav class="snav">
+        <a class="snav__item {% if active_page=='home' %}is-active{% endif %}" href="{{ url_for('home') }}">Home</a>
+        <a class="snav__item {% if active_page=='hume_charts' %}is-active{% endif %}"
+          href="{{ url_for('hume_charts') }}">Hume charts</a>
+        <a class="snav__item {% if active_page=='fitatu' %}is-active{% endif %}"
+          href="{{ url_for('fitatu') }}">Fitatu</a>
+        {# <a class="snav__item {% if active_page=='trends' %}is-active{% endif %}"
+          href="{{ url_for('trends') }}">Trends</a> #}
+        <a class="snav__item {% if active_page=='training_load' %}is-active{% endif %}"
+          href="{{ url_for('training_load_page') }}">Training Load</a>
+        <a class="snav__item {% if active_page=='activities' %}is-active{% endif %}"
+          href="{{ url_for('activities_page') }}">Activities</a>
 
-      <div class="snav__sep"></div>
+        <div class="snav__sep"></div>
 
-      <a class="snav__item {% if active_page=='collectors' %}is-active{% endif %}" href="{{ url_for('collectors') }}">Collectors</a>
-      <a class="snav__item {% if active_page=='hume' %}is-active{% endif %}" href="{{ url_for('hume') }}">Hume invoer</a>
-    </nav>
-  </aside>
+        <a class="snav__item {% if active_page=='collectors' %}is-active{% endif %}"
+          href="{{ url_for('collectors') }}">Collectors</a>
+        <a class="snav__item {% if active_page=='hume' %}is-active{% endif %}" href="{{ url_for('hume') }}">Hume
+          invoer</a>
+      </nav>
+    </aside>
 
-  <!-- Main -->
-  <main class="main">
-    <!-- TOPBAR: jouw originele (ongewijzigd) -->
-    <header class="topbar">
-      <div class="topbar__inner">
+    <!-- Main -->
+    <main class="main">
+      <!-- TOPBAR: jouw originele (ongewijzigd) -->
+      <header class="topbar">
+        <div class="topbar__inner">
 
-        <a class="brand" href="/">
-          <span class="brand__mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path d="M3 13h4l2-6 4 12 2-6h6"
-                    stroke="currentColor" stroke-width="2"
-                    stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </span>
-          <span class="brand__text">Health Monitor</span>
-        </a>
-
-        {# ✅ Oude horizontale nav is bewust verwijderd #}
-
-        <div class="topbar__right">
-          {% set r = READINESS_HEADER %}
-          <span class="pill">
-            <span class="pill__label">Readiness</span>
-            <span class="pill__value">
-              {{ r.score if r and r.score is not none else "—" }}
+          <a class="brand" href="/">
+            <span class="brand__mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M3 13h4l2-6 4 12 2-6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                  stroke-linejoin="round" />
+              </svg>
             </span>
-          </span>
+            <span class="brand__text">Health Monitor</span>
+          </a>
 
-          <span class="pill">{{ USER_NAME }}</span>
+          {# ✅ Oude horizontale nav is bewust verwijderd #}
 
-          <button type="button" class="iconbtn" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z" stroke="currentColor" stroke-width="2"/>
-              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
-                    stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-          </button>
+          <div class="topbar__right">
+            {% set r = READINESS_HEADER %}
+            <span class="pill">
+              <span class="pill__label">Readiness</span>
+              <span class="pill__value">
+                {{ r.score if r and r.score is not none else "—" }}
+              </span>
+            </span>
 
-          <div class="user">
-            <button class="user__btn" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
-              <span class="avatar">{{ (USER_NAME if USER_NAME is defined else "U")[:1] }}</span>
-              <span class="user__name">{{ USER_NAME if USER_NAME is defined else "User" }}</span>
-              <span class="caret" aria-hidden="true">▾</span>
+            <span class="pill">{{ USER_NAME }}</span>
+
+            <button type="button" class="iconbtn" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z" stroke="currentColor" stroke-width="2" />
+                <path
+                  d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
             </button>
 
-            <div class="dropdown" id="userMenu" role="menu" aria-label="User menu">
-              <a class="dropdown__item" href="{{ url_for('collectors') }}" role="menuitem">Run collectors</a>
-              <a class="dropdown__item" href="{{ url_for('fitatu') }}" role="menuitem">Fitatu</a>
-              <a class="dropdown__item" href="{{ url_for('hume') }}" role="menuitem">Hume invoer</a>
-              <div class="dropdown__sep"></div>
-              <a class="dropdown__item dropdown__item--muted" href="#" role="menuitem">Logout (later)</a>
+            <div class="user">
+              <button class="user__btn" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
+                <span class="avatar">{{ (USER_NAME if USER_NAME is defined else "U")[:1] }}</span>
+                <span class="user__name">{{ USER_NAME if USER_NAME is defined else "User" }}</span>
+                <span class="caret" aria-hidden="true">▾</span>
+              </button>
+
+              <div class="dropdown" id="userMenu" role="menu" aria-label="User menu">
+                <a class="dropdown__item" href="{{ url_for('collectors') }}" role="menuitem">Run collectors</a>
+                <a class="dropdown__item" href="{{ url_for('fitatu') }}" role="menuitem">Fitatu</a>
+                <a class="dropdown__item" href="{{ url_for('hume') }}" role="menuitem">Hume invoer</a>
+                <div class="dropdown__sep"></div>
+                <a class="dropdown__item dropdown__item--muted" href="#" role="menuitem">Logout (later)</a>
+              </div>
             </div>
           </div>
+
         </div>
+      </header>
 
-      </div>
-    </header>
-
-    <!-- Page -->
-    <div class="page">
-      <div class="container">
-        {% with messages = get_flashed_messages(with_categories=true) %}
+      <!-- Page -->
+      <div class="page">
+        <div class="container">
+          {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
-            <div class="toasts">
-              {% for cat, msg in messages %}
-                <div class="toast toast--{{ cat }}">{{ msg }}</div>
-              {% endfor %}
-            </div>
+          <div class="toasts">
+            {% for cat, msg in messages %}
+            <div class="toast toast--{{ cat }}">{{ msg }}</div>
+            {% endfor %}
+          </div>
           {% endif %}
-        {% endwith %}
+          {% endwith %}
 
-        {% block content %}{% endblock %}
+          {% block content %}{% endblock %}
+        </div>
       </div>
-    </div>
-  </main>
-</div>
+    </main>
+  </div>
 
-<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
-{% block scripts %}{% endblock %}
+  <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+  {% block scripts %}{% endblock %}
 </body>
+
 </html>

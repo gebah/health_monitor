@@ -1304,6 +1304,63 @@ def tsb_to_score(tsb):
     tsb = max(-30, min(30, float(tsb or 0)))
     return int((tsb + 30) / 60 * 100)
 
+from datetime import datetime, timedelta
+
+def get_hume_weekly_summary(conn):
+    rows = conn.execute("""
+        SELECT day, weight_kg, body_fat_pct, muscle_mass_kg, lean_mass_kg, visceral_fat_index
+        FROM hume_body
+        WHERE day IS NOT NULL
+        ORDER BY day DESC
+        LIMIT 21
+    """).fetchall()
+
+    rows = [dict(r) for r in rows]
+    if not rows:
+        return None
+
+    def avg(values):
+        values = [v for v in values if v is not None]
+        return round(sum(values) / len(values), 2) if values else None
+
+    this_week = rows[:7]
+    prev_week = rows[7:14]
+
+    if not this_week or not prev_week:
+        return None
+
+    current = {
+        "weight": avg([r["weight_kg"] for r in this_week]),
+        "bf": avg([r["body_fat_pct"] for r in this_week]),
+        "mm": avg([r["muscle_mass_kg"] for r in this_week]),
+        "lm": avg([r["lean_mass_kg"] for r in this_week]),
+        "vf": avg([r["visceral_fat_index"] for r in this_week]),
+    }
+
+    previous = {
+        "weight": avg([r["weight_kg"] for r in prev_week]),
+        "bf": avg([r["body_fat_pct"] for r in prev_week]),
+        "mm": avg([r["muscle_mass_kg"] for r in prev_week]),
+        "lm": avg([r["lean_mass_kg"] for r in prev_week]),
+        "vf": avg([r["visceral_fat_index"] for r in prev_week]),
+    }
+
+    def delta(cur, prev):
+        if cur is None or prev is None:
+            return None
+        return round(cur - prev, 2)
+
+    return {
+        "weight_delta": delta(current["weight"], previous["weight"]),
+        "bf_delta": delta(current["bf"], previous["bf"]),
+        "mm_delta": delta(current["mm"], previous["mm"]),
+        "lm_delta": delta(current["lm"], previous["lm"]),
+        "vf_delta": delta(current["vf"], previous["vf"]),
+        "current": current,
+        "previous": previous,
+    }
+
+
 @app.route("/")
 def home():
     days = int(request.args.get("days", 30))
@@ -1365,7 +1422,7 @@ def home():
     delta_bf = deltas.get("delta_bf")
     lbmi = deltas.get("lbmi")
     delta_lbmi = deltas.get("delta_lbmi")
-
+    
     lbmi_display = round(lbmi, 2) if lbmi is not None else None
     delta_lbmi_display = round(delta_lbmi, 2) if delta_lbmi is not None else None
 
@@ -1423,7 +1480,10 @@ def home():
 @app.route("/hume/charts")
 def hume_charts():
     days = int(request.args.get("days", 180))
-    return render_template("hume_charts.html", active_page="hume", days=days, USER_HEIGHT=USER_HEIGHT)
+    with get_conn() as conn:
+        hume_summary = get_hume_weekly_summary(conn)
+    
+    return render_template("hume_charts.html", active_page="hume_charts", days=days, USER_HEIGHT=USER_HEIGHT, hume_summary=hume_summary,)
 
 @app.route("/trends")
 def trends():

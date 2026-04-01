@@ -56,10 +56,8 @@ data-weekly-kcal-target="17500"
 
     <div class="card__body">
       <div class="insight-layout">
-        <div
-          class="recovery-gauge recovery-gauge--{{ training_advice.tone }}"
-          style="--value: {{ advice_score or 0 }};"
-        >
+        <div class="recovery-gauge recovery-gauge--{{ training_advice.tone }}"
+          style="--value: {{ advice_score or 0 }};">
           <svg viewBox="0 0 120 120" class="recovery-gauge__svg" aria-hidden="true">
             <circle class="recovery-gauge__track" cx="60" cy="60" r="46"></circle>
             <circle class="recovery-gauge__progress" cx="60" cy="60" r="46"></circle>
@@ -92,141 +90,144 @@ data-weekly-kcal-target="17500"
       <div class="strava-status-content">
         <div class="metrics-grid">
           <div class="metric-box">
-           <div class="metric-box__label">Fitness</div>
-          <div class="metric-box__value">{{ strava_status.fitness }}</div>
-          <div class="metric-box__sub">
-            {% if strava_status.fitness_delta > 0 %}
+            <div class="metric-box__label">Fitness</div>
+            <div class="metric-box__value">{{ strava_status.fitness }}</div>
+            <div class="metric-box__sub">
+              {% if strava_status.fitness_delta > 0 %}
               ↑ {{ strava_status.fitness_delta }}
-            {% elif strava_status.fitness_delta < 0 %}
-              ↓ {{ strava_status.fitness_delta | abs }}
+              {% elif strava_status.fitness_delta < 0 %} ↓ {{ strava_status.fitness_delta | abs }} {% else %} → 0.0 {%
+                endif %} </div>
+            </div>
+
+            <div class="metric-box">
+              <div class="metric-box__label">Vermoeidheid</div>
+              <div class="metric-box__value">{{ strava_status.fatigue }}</div>
+              <div class="metric-box__sub">
+                {% if strava_status.fatigue_delta > 0 %}
+                ↑ {{ strava_status.fatigue_delta }}
+                {% elif strava_status.fatigue_delta < 0 %} ↓ {{ strava_status.fatigue_delta | abs }} {% else %} → 0.0 {%
+                  endif %} </div>
+              </div>
+
+              <div class="metric-box">
+                <div class="metric-box__label">Vorm</div>
+                <div class="metric-box__value">{{ strava_status.form }}</div>
+                <div class="metric-box__sub">
+                  {% if strava_status.form_delta > 0 %}
+                  ↑ {{ strava_status.form_delta }}
+                  {% elif strava_status.form_delta < 0 %} ↓ {{ strava_status.form_delta | abs }} {% else %} → 0.0 {%
+                    endif %} </div>
+                </div>
+
+                <div class="metric-box">
+                  <div class="metric-box__label">Vandaag load</div>
+                  <div class="metric-box__value">
+                    {{ strava_status.daily_load if strava_status.daily_load is not none else "—" }}
+                  </div>
+                  <div class="metric-box__sub">vandaag</div>
+                </div>
+              </div>
+
+              <div class="chart chart--mini" id="strava_status_trend_chart"></div>
+            </div>
             {% else %}
-              → 0.0
+            <div class="muted">Nog geen Strava load-data beschikbaar.</div>
             {% endif %}
           </div>
-        </div>
-
-        <div class="metric-box">
-          <div class="metric-box__label">Vermoeidheid</div>
-          <div class="metric-box__value">{{ strava_status.fatigue }}</div>
-          <div class="metric-box__sub">
-            {% if strava_status.fatigue_delta > 0 %}
-              ↑ {{ strava_status.fatigue_delta }}
-            {% elif strava_status.fatigue_delta < 0 %}
-              ↓ {{ strava_status.fatigue_delta | abs }}
-            {% else %}
-              → 0.0
-            {% endif %}
-          </div>
-        </div>
-
-        <div class="metric-box">
-          <div class="metric-box__label">Vorm</div>
-          <div class="metric-box__value">{{ strava_status.form }}</div>
-          <div class="metric-box__sub">
-            {% if strava_status.form_delta > 0 %}
-              ↑ {{ strava_status.form_delta }}
-            {% elif strava_status.form_delta < 0 %}
-              ↓ {{ strava_status.form_delta | abs }}
-            {% else %}
-              → 0.0
-            {% endif %}
-          </div>
-        </div>
-
-        <div class="metric-box">
-          <div class="metric-box__label">Vandaag load</div>
-          <div class="metric-box__value">
-            {{ strava_status.daily_load if strava_status.daily_load is not none else "—" }}
-          </div>
-          <div class="metric-box__sub">vandaag</div>
         </div>
       </div>
 
-      <div class="chart chart--mini" id="strava_status_trend_chart"></div>
-    </div>
-    {% else %}
-      <div class="muted">Nog geen Strava load-data beschikbaar.</div>
-    {% endif %}
-    </div>
-  </div>
-</div>
+      <div class="card">
+        <div class="card__header">
+          <h3>Hume</h3>
+        </div>
+        <div class="card__body">
+          {% if hume_summary %}
+          <div class="hume-summary">
+            <strong>Laatste week:</strong>
 
-<div class="card">
-  <div class="card__header">
-    <h3>Hume</h3>
-  </div>
-
-  <div class="card__body">
-    {% if latest_hume %}
-      <div class="metrics-grid">
-        <div class="metric-box">
-          <div class="metric-box__label">Weight</div>
-          <div class="metric-box__value">
-            {% if latest_hume.weight_kg is not none %}
-              {{ latest_hume.weight_kg | round(1) }} kg
-            {% else %}
-              —
-            {% endif %}
+            {% if hume_summary["weight_delta"] is not none %}
+            {{ hume_summary["weight_delta"] | round(1) | abs }} kg
+            {% if hume_summary["weight_delta"] < 0 %}lager{% else %}hoger{% endif %} dan vorige week {% endif %} {% if
+              hume_summary["bf_delta"] is not none %} , vet {{ hume_summary["bf_delta"] | round(1) | abs }}% {% if
+              hume_summary["bf_delta"] < 0 %}lager{% else %}hoger{% endif %} {% endif %} {% if
+              hume_summary["water_delta"] is not none %} , vocht {{ hume_summary["water_delta"] | round(1) | abs }}% {%
+              if hume_summary["water_delta"]> 0 %}hoger{% else %}lager{% endif %}
+              {% endif %}
+              .
           </div>
-        </div>
+          {% endif %}
+          
+          {% if latest_hume %}
+          <div class="metrics-grid">
+            <div class="metric-box">
+              <div class="metric-box__label">Weight</div>
+              <div class="metric-box__value">
+                {% if latest_hume.weight_kg is not none %}
+                {{ latest_hume.weight_kg | round(1) }} kg
+                {% else %}
+                —
+                {% endif %}
+              </div>
+            </div>
 
-        <div class="metric-box">
-          <div class="metric-box__label">Body fat</div>
-          <div class="metric-box__value">
-            {% if latest_hume.body_fat_pct is not none %}
-              {{ latest_hume.body_fat_pct | round(1) }} %
-            {% else %}
-              —
-            {% endif %}
+            <div class="metric-box">
+              <div class="metric-box__label">Body fat</div>
+              <div class="metric-box__value">
+                {% if latest_hume.body_fat_pct is not none %}
+                {{ latest_hume.body_fat_pct | round(1) }} %
+                {% else %}
+                —
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="metric-box">
+              <div class="metric-box__label">Lean mass</div>
+              <div class="metric-box__value">
+                {% if latest_hume.lean_mass_kg is not none %}
+                {{ latest_hume.lean_mass_kg | round(1) }} kg
+                {% else %}
+                —
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="metric-box">
+              <div class="metric-box__label">LBMI</div>
+              <div class="metric-box__value">{{ lbmi_display if lbmi_display is not none else "—" }}</div>
+            </div>
+
+            <div class="metric-box">
+              <div class="metric-box__label">Δ weight</div>
+              <div class="metric-box__value">{{ delta_weight | round(1) if delta_weight is not none else "—" }}</div>
+            </div>
+
+            <div class="metric-box">
+              <div class="metric-box__label">Δ body fat</div>
+              <div class="metric-box__value">{{ delta_bf | round(1) if delta_bf is not none else "—" }}</div>
+            </div>
+
+            <div class="metric-box">
+              <div class="metric-box__label">Δ lean</div>
+              <div class="metric-box__value">{{ delta_lean | round(1) if delta_lean is not none else "—" }}</div>
+            </div>
+
+            <div class="metric-box">
+              <div class="metric-box__label">Δ LBMI</div>
+              <div class="metric-box__value">{{ delta_lbmi_display if delta_lbmi_display is not none else "—" }}</div>
+            </div>
           </div>
-        </div>
-
-        <div class="metric-box">
-          <div class="metric-box__label">Lean mass</div>
-          <div class="metric-box__value">
-            {% if latest_hume.lean_mass_kg is not none %}
-              {{ latest_hume.lean_mass_kg | round(1) }} kg
-            {% else %}
-              —
-            {% endif %}
-          </div>
-        </div>
-
-        <div class="metric-box">
-          <div class="metric-box__label">LBMI</div>
-          <div class="metric-box__value">{{ lbmi_display if lbmi_display is not none else "—" }}</div>
-        </div>
-
-        <div class="metric-box">
-          <div class="metric-box__label">Δ weight</div>
-          <div class="metric-box__value">{{ delta_weight | round(1) if delta_weight is not none else "—" }}</div>
-        </div>
-
-        <div class="metric-box">
-          <div class="metric-box__label">Δ body fat</div>
-          <div class="metric-box__value">{{ delta_bf | round(1) if delta_bf is not none else "—" }}</div>
-        </div>
-
-        <div class="metric-box">
-          <div class="metric-box__label">Δ lean</div>
-          <div class="metric-box__value">{{ delta_lean | round(1) if delta_lean is not none else "—" }}</div>
-        </div>
-
-        <div class="metric-box">
-          <div class="metric-box__label">Δ LBMI</div>
-          <div class="metric-box__value">{{ delta_lbmi_display if delta_lbmi_display is not none else "—" }}</div>
+          {% else %}
+          <div class="muted">No Hume measurements yet</div>
+          {% endif %}
         </div>
       </div>
-    {% else %}
-      <div class="muted">No Hume measurements yet</div>
-    {% endif %}
-  </div>
-</div>
 
-{% endblock %}
+      {% endblock %}
 
-{% block scripts %}
-<script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
-<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
-{% endblock %}
+      {% block scripts %}
+      <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+      <script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
+      <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+      {% endblock %}
