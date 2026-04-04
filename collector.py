@@ -172,6 +172,18 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 
     conn.commit()
 
+def ensure_manual_recovery_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS manual_recovery_entries (
+            day TEXT PRIMARY KEY,
+            hrv_rmssd REAL,
+            stress REAL,
+            sleep_score REAL,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
 
 # ----------------------------
 # Garmin Activities Sync

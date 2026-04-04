@@ -436,10 +436,6 @@ html[data-theme="dark"] .user__btn:hover {
   font-size: 18px;
 }
 
-.card__body {
-  min-width: 0;
-}
-
 .good {
   color: var(--good);
   font-weight: 700;
@@ -479,8 +475,8 @@ html[data-theme="dark"] .user__btn:hover {
 .grid2 {
   display: grid;
   gap: 18px;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  align-items: stretch;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
 }
 
 .span2 {
@@ -504,12 +500,16 @@ html[data-theme="dark"] .user__btn:hover {
   grid-column: span 2;
 }
 
-.grid2>.card,
+.grid2 > .card 
 .grid3>.card,
 .charts-grid>.card {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: auto;
+}
+
+.home-bottom-grid {
+  align-items: start;
 }
 
 /* =========================
@@ -1133,9 +1133,6 @@ html[data-theme="dark"] .dial {
 /* =========================
    Home dashboard final layout
 ========================= */
-/* =========================
-   Home dashboard final layout
-========================= */
 .status-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1179,7 +1176,7 @@ html[data-theme="dark"] .dial {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
   width: 100%;
-  align-items: stretch;
+  align-items: start;
   margin-bottom: 16px;
 }
 
@@ -1204,21 +1201,6 @@ html[data-theme="dark"] .dial {
   width: 100%;
   min-width: 0;
   padding-top: 12px;
-}
-
-.insight-layout {
-  display: grid;
-  grid-template-columns: 170px minmax(0, 1fr);
-  gap: 24px;
-  align-items: center;
-  width: 100%;
-}
-
-.insight-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
 }
 
 .insight-copy__title {
@@ -1287,7 +1269,7 @@ html[data-theme="dark"] .dial {
 
 .chart--mini {
   width: 100%;
-  height: 220px;
+  height: 100px;
   margin-top: 0;
   border-top: 1px solid var(--border);
   padding-top: 14px;
@@ -1404,4 +1386,324 @@ html[data-theme="dark"] .dial {
 
 .coach-card--unknown{
   border-color:var(--border);
+}
+
+.grid-2{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0,1fr));
+  gap:16px;
+  margin-bottom:16px;
+}
+
+.form-grid{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0,1fr));
+  gap:14px;
+}
+
+.form-grid label{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.form-grid__full{
+  grid-column:1 / -1;
+}
+
+.form-grid input,
+.form-grid textarea{
+  width:100%;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--panel-2);
+  color:var(--text);
+}
+
+.metric-list{
+  display:grid;
+  gap:10px;
+}
+
+.metric-list > div{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  border-bottom:1px solid var(--border);
+  padding-bottom:8px;
+}
+
+.compact-list{
+  margin:10px 0 0;
+  padding-left:18px;
+}
+
+.coach-status{
+  display:inline-block;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:.9rem;
+  margin-bottom:10px;
+  border:1px solid var(--border);
+}
+
+.coach-status--fresh{
+  font-weight:600;
+}
+
+.coach-status--ready{
+  font-weight:600;
+}
+
+.coach-status--light_fatigue{
+  font-weight:600;
+}
+
+.coach-status--recovery_needed{
+  font-weight:700;
+}
+
+@media (max-width: 900px){
+  .grid-2,
+  .form-grid{
+    grid-template-columns:1fr;
+  }
+}
+
+.card__header--split{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.coach-main{
+  display:grid;
+  gap:14px;
+  margin-bottom:14px;
+}
+
+.coach-main p{
+  margin:0;
+  line-height:1.5;
+}
+
+.compact-list--coach{
+  margin:0 0 18px 0;
+  padding-left:18px;
+}
+
+.coach-subtitle{
+  margin:18px 0 10px;
+  font-size:.85rem;
+  font-weight:700;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+
+.coach-metrics{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:12px;
+  margin-top:8px;
+}
+
+.coach-metric-card{
+  background:var(--panel-2);
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:14px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.coach-metric-card__label{
+  font-size:.82rem;
+  color:var(--muted);
+  font-weight:600;
+}
+
+.coach-metric-card__value{
+  font-size:1.5rem;
+  line-height:1.1;
+}
+
+.coach-metric-card__meta{
+  font-size:.82rem;
+  color:var(--muted);
+}
+
+.coach-note{
+  margin-top:14px;
+  padding:12px 14px;
+  border:1px solid var(--border);
+  background:var(--panel-2);
+  border-radius:12px;
+}
+
+.coach-note p{
+  margin:6px 0 0;
+  color:var(--text);
+}
+
+@media (max-width: 900px){
+  .coach-metrics{
+    grid-template-columns:1fr;
+  }
+
+  .card__header--split{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+}
+
+.training-advice{
+  display:flex;
+  align-items:center;
+  gap:24px;
+}
+
+.training-advice__gauge{
+  flex:0 0 140px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.training-advice__content{
+  flex:1;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.training-advice__headline{
+  font-size:1.05rem;
+  font-weight:700;
+  line-height:1.35;
+  color:var(--text);
+}
+
+.training-advice__text{
+  color:var(--muted);
+  line-height:1.5;
+  margin:0;
+  max-width:62ch;
+}
+
+.training-advice__meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-top:2px;
+}
+
+.training-advice__meta-item{
+  min-width:120px;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--panel-2);
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+.training-advice__meta-item span{
+  font-size:.78rem;
+  font-weight:700;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.03em;
+}
+
+.training-advice__meta-item strong{
+  font-size:1rem;
+  color:var(--text);
+}
+
+.training-advice .recovery-gauge{
+  width:118px;
+  height:118px;
+  margin:0;
+}
+
+.training-advice .recovery-gauge__score{
+  font-size:2rem;
+}
+
+.training-advice .recovery-gauge__label{
+  font-size:.9rem;
+}
+
+@media (max-width: 900px){
+  .training-advice{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+
+  .training-advice__gauge{
+    flex:0 0 auto;
+  }
+
+  .training-advice__text{
+    max-width:none;
+  }
+}
+
+.training-advice__meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-top:2px;
+}
+
+.training-advice__meta-item{
+  min-width:120px;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--panel-2);
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+.training-advice__meta-item span{
+  font-size:.78rem;
+  font-weight:700;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.03em;
+}
+
+.training-advice__meta-item strong{
+  font-size:1rem;
+  color:var(--text);
+}
+
+.training-advice__meta-item--good{
+  border-color:rgba(34,197,94,.28);
+  background:rgba(34,197,94,.08);
+}
+
+.training-advice__meta-item--ok{
+  border-color:rgba(245,158,11,.28);
+  background:rgba(245,158,11,.08);
+}
+
+.training-advice__meta-item--warn,
+.training-advice__meta-item--bad{
+  border-color:rgba(239,68,68,.28);
+  background:rgba(239,68,68,.08);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }

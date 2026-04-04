@@ -1,7 +1,9 @@
 from flask import Flask, render_template, request, jsonify, redirect, current_app, url_for, flash
 from datetime import date, datetime, timedelta
-from collector import sync_garmin, sync_strava, sync_all
+from collector import sync_garmin, sync_strava, sync_all, ensure_manual_recovery_table
 from models import avg_ignore_none, get_daily_metrics_history, calc_body_deltas
+from recovery import get_latest_manual_recovery, get_manual_recovery_series, get_best_recovery_for_day, get_latest_recovery_input, get_recovery_baselines
+
 
 import sqlite3
 import json
@@ -62,7 +64,6 @@ def ensure_cache_table(conn):
         )
     """)
 
-
 def cache_set(conn, key, obj):
     ensure_cache_table(conn)
     conn.execute("""
@@ -84,8 +85,6 @@ def cache_get(conn, key, default=None):
     except Exception:
         return default
 
-def row_to_dict(row):
-    return dict(row) if row else {}
 
 def readiness_score(
     latest,
@@ -473,7 +472,6 @@ def calculate_recovery_gauge(
             "tcl": tcl_score,
         }
     }
-
 
 @app.context_processor
 def inject_globals():
@@ -1158,6 +1156,167 @@ def get_latest_strava_readiness(conn):
 
     return row
 
+def build_coach_signals(conn):
+    recovery = get_latest_recovery_input(conn)
+    baselines = get_recovery_baselines(conn)
+
+    tcl_7d = get_tcl_7d(conn)
+    strava_status = get_live_strava_status(conn) or {}
+
+    tsb = strava_status.get("form")
+    ctl = strava_status.get("fitness")
+    atl = strava_status.get("fatigue")
+
+    signals = {
+        "recovery": recovery,
+        "baselines": baselines,
+        "tcl_7d": tcl_7d,
+        "ctl": ctl,
+        "atl": atl,
+        "tsb": tsb,
+        "hrv_flag": None,
+        "stress_flag": None,
+        "sleep_flag": None,
+        "load_flag": None,
+        "priority": None,
+        "status": "ready",
+        "top_insight": "",
+        "bullets": [],
+        "advice": "",
+    }
+
+    if recovery and baselines["n_days"] >= 3:
+        hrv = recovery.get("hrv_rmssd")
+        stress = recovery.get("stress")
+        sleep = recovery.get("sleep_score")
+
+        hrv_base = baselines.get("hrv_baseline")
+        stress_base = baselines.get("stress_baseline")
+        sleep_base = baselines.get("sleep_baseline")
+
+        if hrv is not None and hrv_base is not None:
+            if hrv <= hrv_base * 0.90:
+                signals["hrv_flag"] = "low"
+            elif hrv >= hrv_base * 1.05:
+                signals["hrv_flag"] = "good"
+            else:
+                signals["hrv_flag"] = "normal"
+
+        if stress is not None and stress_base is not None:
+            if stress >= stress_base + 5:
+                signals["stress_flag"] = "high"
+            elif stress <= stress_base - 3:
+                signals["stress_flag"] = "good"
+            else:
+                signals["stress_flag"] = "normal"
+
+        if sleep is not None and sleep_base is not None:
+            if sleep < 60:
+                signals["sleep_flag"] = "low"
+            elif sleep < sleep_base - 7:
+                signals["sleep_flag"] = "below_baseline"
+            elif sleep >= sleep_base:
+                signals["sleep_flag"] = "good"
+            else:
+                signals["sleep_flag"] = "normal"
+
+    if tsb is not None:
+        if tsb <= -20:
+            signals["load_flag"] = "very_fatigued"
+        elif tsb <= -10:
+            signals["load_flag"] = "fatigued"
+        elif tsb >= 10:
+            signals["load_flag"] = "fresh"
+        else:
+            signals["load_flag"] = "normal"
+
+    return signals
+
+def build_priority_coach_message(conn):
+    s = build_coach_signals(conn)
+
+    bullets = []
+
+    if s["hrv_flag"] == "low":
+        bullets.append("HRV ligt onder je baseline")
+    elif s["hrv_flag"] == "good":
+        bullets.append("HRV ligt op of boven je baseline")
+
+    if s["stress_flag"] == "high":
+        bullets.append("Stress ligt hoger dan normaal")
+    elif s["stress_flag"] == "good":
+        bullets.append("Stress is lager dan normaal")
+
+    if s["sleep_flag"] == "low":
+        bullets.append("Slaapscore is laag")
+    elif s["sleep_flag"] == "below_baseline":
+        bullets.append("Slaapscore ligt onder je normale niveau")
+    elif s["sleep_flag"] == "good":
+        bullets.append("Slaapscore is prima")
+
+    if s["load_flag"] == "very_fatigued":
+        bullets.append("Strava freshness wijst op stevige vermoeidheid")
+    elif s["load_flag"] == "fatigued":
+        bullets.append("Trainingsvermoeidheid loopt op")
+    elif s["load_flag"] == "fresh":
+        bullets.append("Je bent relatief fris qua trainingsbelasting")
+
+    # prioriteit bepalen
+    red_recovery = sum([
+        1 if s["hrv_flag"] == "low" else 0,
+        1 if s["stress_flag"] == "high" else 0,
+        1 if s["sleep_flag"] in ("low", "below_baseline") else 0,
+    ])
+
+    heavy_load = s["load_flag"] in ("fatigued", "very_fatigued")
+
+    if red_recovery >= 2 and heavy_load:
+        status = "recovery_needed"
+        priority = "recovery"
+        top_insight = "Zowel herstel als trainingsbelasting geven nu een duidelijke waarschuwing."
+        advice = "Vandaag liefst herstel, wandelen of hooguit heel rustig duurwerk. Geen zware beensessie."
+    elif red_recovery >= 2:
+        status = "light_fatigue"
+        priority = "recovery"
+        top_insight = "Je herstel is momenteel de beperkende factor."
+        advice = "Hou training licht tot matig en geef slaap en herstel prioriteit."
+    elif heavy_load:
+        if s["load_flag"] == "very_fatigued":
+            status = "recovery_needed"
+            priority = "fatigue"
+            top_insight = "Je trainingsbelasting is nu duidelijk hoger dan je herstel aankan."
+            advice = "Neem gas terug: hersteltraining of rustdag is hier het verstandigst."
+        else:
+            status = "light_fatigue"
+            priority = "fatigue"
+            top_insight = "Je herstel is niet slecht, maar trainingsvermoeidheid stapelt zich op."
+            advice = "Rustige duurtraining of upper body kan prima, zware benenprikkel liever uitstellen."
+    else:
+        if s["hrv_flag"] == "good" and s["sleep_flag"] == "good":
+            status = "fresh"
+            priority = "readiness"
+            top_insight = "Je recovery-signalen staan er goed voor."
+            advice = "Goede dag voor kwaliteitstraining, mits je benen ook subjectief oké voelen."
+        else:
+            status = "ready"
+            priority = "readiness"
+            top_insight = "Er zijn geen sterke rode vlaggen; je bent normaal trainbaar."
+            advice = "Normale trainingsdag is prima, met wat ruimte om op gevoel te sturen."
+
+    return {
+        "status": status,
+        "priority": priority,
+        "top_insight": top_insight,
+        "bullets": bullets[:4],
+        "advice": advice,
+        "recovery": s["recovery"],
+        "baselines": s["baselines"],
+        "tsb": s["tsb"],
+        "ctl": s["ctl"],
+        "atl": s["atl"],
+        "tcl_7d": s["tcl_7d"],
+    }
+
 @app.route("/api/strava_status_trend")
 def api_strava_status_trend():
     days = int(request.args.get("days", 7))
@@ -1300,10 +1459,6 @@ def tsb_to_score(tsb):
     tsb = max(-30, min(30, float(tsb or 0)))
     return int((tsb + 30) / 60 * 100)
 
-def tsb_to_score(tsb):
-    tsb = max(-30, min(30, float(tsb or 0)))
-    return int((tsb + 30) / 60 * 100)
-
 from datetime import datetime, timedelta
 
 def get_hume_weekly_summary(conn):
@@ -1439,19 +1594,24 @@ def build_coach_insight(hume_summary=None, readiness_header=None, strava_status=
         insight["advice"] = "Blijf de trend nog even volgen en stuur vooral op herstelkwaliteit, eiwitinname en trainingsdosering."
 
     return insight    
-    
+
 @app.route("/")
 def home():
     days = int(request.args.get("days", 30))
 
     with get_conn() as conn:
+        ensure_manual_recovery_table(conn)
+
         latest_row = conn.execute(
             "SELECT * FROM daily_metrics ORDER BY day DESC LIMIT 1"
         ).fetchone()
         latest = row_to_dict(latest_row)
 
-        tl = get_training_load_today(conn)
+        coach_v2 = build_priority_coach_message(conn)
+
         tcl_7d = get_tcl_7d(conn)
+        tl = get_training_load_today(conn)
+        flags = get_recovery_flags(conn)
         strava_status = get_live_strava_status(conn)
 
         latest_hume_row = conn.execute(
@@ -1492,6 +1652,9 @@ def home():
             tcl_7d=tcl_7d,
             tcl_target_7d=300,
             tsb=tl.get("tsb"),
+            atl=tl.get("atl"),
+            ctl=tl.get("ctl"),
+            flags=flags,
         ) if latest else {}
 
         hume_summary = get_hume_weekly_summary(conn)
@@ -1521,9 +1684,9 @@ def home():
         height_m=USER_HEIGHT,
     )
 
-    delta_weight = deltas.get("delta_weight")
-    delta_lean = deltas.get("delta_lean")
-    delta_bf = deltas.get("delta_bf")
+    delta_weight = round(deltas.get("delta_weight"), 1) if deltas.get("delta_weight") is not None else None
+    delta_lean = round(deltas.get("delta_lean"), 1) if deltas.get("delta_lean") is not None else None
+    delta_bf = round(deltas.get("delta_bf"), 1) if deltas.get("delta_bf") is not None else None
     lbmi = deltas.get("lbmi")
     delta_lbmi = deltas.get("delta_lbmi")
 
@@ -1567,14 +1730,15 @@ def home():
         training_advice=training_advice,
         advice_score=training_advice.get("score"),
         strava_status=strava_status,
-        USER_NAME=USER_NAME,
-        USER_HEIGHT=USER_HEIGHT,
+        tl=tl,
+        readiness=readiness,
         hume_summary=hume_summary,
         coach_insight=coach_insight,
+        coach_v2=coach_v2,
+        USER_NAME=USER_NAME,
+        USER_HEIGHT=USER_HEIGHT,
     )
-
-
-
+    
 @app.route("/hume/charts")
 def hume_charts():
     days = int(request.args.get("days", 180))
@@ -2059,7 +2223,57 @@ def fitatu():
         weekly_summary=weekly_summary,
     )
 
+@app.route("/recovery", methods=["GET", "POST"])
+def recovery():
+    with get_conn() as conn:
+        ensure_manual_recovery_table(conn)
 
+        if request.method == "POST":
+            day = request.form.get("day", "").strip()
+            hrv = request.form.get("hrv_rmssd", "").strip()
+            stress = request.form.get("stress", "").strip()
+            sleep_score = request.form.get("sleep_score", "").strip()
+            notes = request.form.get("notes", "").strip()
+
+            def to_float(v):
+                if v == "":
+                    return None
+                return float(v.replace(",", "."))
+
+            try:
+                conn.execute("""
+                    INSERT INTO manual_recovery_entries (
+                        day, hrv_rmssd, stress, sleep_score, notes
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(day) DO UPDATE SET
+                        hrv_rmssd = excluded.hrv_rmssd,
+                        stress = excluded.stress,
+                        sleep_score = excluded.sleep_score,
+                        notes = excluded.notes,
+                        created_at = CURRENT_TIMESTAMP
+                """, (
+                    day,
+                    to_float(hrv),
+                    to_float(stress),
+                    to_float(sleep_score),
+                    notes or None,
+                ))
+                conn.commit()
+                flash("Recovery data opgeslagen.", "success")
+                return redirect(url_for("recovery"))
+
+            except Exception as e:
+                flash(f"Opslaan mislukt: {e}", "error")
+
+        latest_manual = get_latest_manual_recovery(conn)
+        coach = build_priority_coach_message(conn)
+
+    return render_template(
+        "recovery.html",
+        active_page="recovery",
+        latest_manual=latest_manual,
+        coach=coach,
+    )
 
 if __name__ == "__main__":
     app.run(debug=True)
