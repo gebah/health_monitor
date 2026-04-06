@@ -48,12 +48,16 @@ data-weekly-kcal-target="17500"
 </div>
 
 <section class="card coach-card">
-  <div class="card__header card__header--split">
-    <h3>Coach advies</h3>
-    <div class="coach-status coach-status--{{ coach_v2.status }}">
-      {{ coach_v2.status.replace("_", " ").title() }}
-    </div>
-  </div>
+  <div class="coach-header">
+  <h3>Coach advies</h3>
+  <span class="coach-status coach-status--{{ coach_v2.status }}">
+    {{ coach_v2.status.replace("_", " ").title() }}
+  </span>
+</div>
+
+<div class="coach-meta">
+  Zekerheid: {{ coach_v2.confidence }}
+</div>
 
   <div class="card__body">
     <div class="coach-main">
@@ -61,12 +65,32 @@ data-weekly-kcal-target="17500"
       <p><strong>Advies vandaag</strong><br>{{ coach_v2.advice }}</p>
     </div>
 
+    {% if coach_v2.why %}
+    <div class="coach-why">
+      <div class="coach-why__title">Waarom dit advies</div>
+      <ul class="coach-why__list">
+        {% for item in coach_v2.why %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
     {% if coach_v2.bullets %}
     <ul class="compact-list compact-list--coach">
       {% for item in coach_v2.bullets %}
       <li>{{ item }}</li>
       {% endfor %}
     </ul>
+    {% endif %}
+
+    <p><strong>Hersteltrend</strong></br></p>
+    {% if coach_v2.trend == "worsening" %}
+      verslechterend
+    {% elif coach_v2.trend == "improving" %}
+      verbeterend
+    {% else %}
+      stabiel
     {% endif %}
 
     {% if coach_v2.recovery %}

@@ -819,6 +819,141 @@ def get_training_load_series(conn, days_back: int = 365):
 
     return out
 
+def build_recovery_summary(conn):
+    rows = conn.execute("""
+        SELECT day, hrv_rmssd, stress, sleep_score, notes
+        FROM manual_recovery_entries
+        ORDER BY day DESC
+        LIMIT 7
+    """).fetchall()
+
+    rows = [dict(r) for r in rows]
+    if not rows:
+        return {
+            "n_days": 0,
+            "hrv_baseline": None,
+            "stress_baseline": None,
+            "sleep_baseline": None,
+            "hrv_today": None,
+            "stress_today": None,
+            "sleep_today": None,
+            "hrv_status": None,
+            "stress_status": None,
+            "sleep_status": None,
+            "trend": "unknown",
+            "confidence": "low",
+            "latest_notes": None,
+        }
+
+    def avg(values):
+        vals = [v for v in values if v is not None]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    latest = rows[0]
+
+    hrv_today = latest.get("hrv_rmssd")
+    stress_today = latest.get("stress")
+    sleep_today = latest.get("sleep_score")
+
+    hrv_baseline = avg([r.get("hrv_rmssd") for r in rows[:7]])
+    stress_baseline = avg([r.get("stress") for r in rows[:7]])
+    sleep_baseline = avg([r.get("sleep_score") for r in rows[:7]])
+
+    hrv_status = None
+    stress_status = None
+    sleep_status = None
+
+    if hrv_today is not None and hrv_baseline is not None:
+        if hrv_today <= hrv_baseline * 0.90:
+            hrv_status = "low"
+        elif hrv_today >= hrv_baseline * 1.05:
+            hrv_status = "good"
+        else:
+            hrv_status = "normal"
+
+    if stress_today is not None and stress_baseline is not None:
+        if stress_today >= stress_baseline + 5:
+            stress_status = "high"
+        elif stress_today <= stress_baseline - 3:
+            stress_status = "good"
+        else:
+            stress_status = "normal"
+
+    if sleep_today is not None and sleep_baseline is not None:
+        if sleep_today < 60:
+            sleep_status = "low"
+        elif sleep_today < sleep_baseline - 7:
+            sleep_status = "below_baseline"
+        elif sleep_today >= sleep_baseline:
+            sleep_status = "good"
+        else:
+            sleep_status = "normal"
+
+    # trend op basis van laatste 3 vs oudere 4
+    recent = rows[:3]
+    older = rows[3:7]
+
+    recent_hrv = avg([r.get("hrv_rmssd") for r in recent])
+    older_hrv = avg([r.get("hrv_rmssd") for r in older])
+
+    recent_stress = avg([r.get("stress") for r in recent])
+    older_stress = avg([r.get("stress") for r in older])
+
+    recent_sleep = avg([r.get("sleep_score") for r in recent])
+    older_sleep = avg([r.get("sleep_score") for r in older])
+
+    worsening_signals = 0
+    improving_signals = 0
+
+    if recent_hrv is not None and older_hrv is not None:
+        if recent_hrv < older_hrv * 0.95:
+            worsening_signals += 1
+        elif recent_hrv > older_hrv * 1.03:
+            improving_signals += 1
+
+    if recent_stress is not None and older_stress is not None:
+        if recent_stress > older_stress + 3:
+            worsening_signals += 1
+        elif recent_stress < older_stress - 2:
+            improving_signals += 1
+
+    if recent_sleep is not None and older_sleep is not None:
+        if recent_sleep < older_sleep - 5:
+            worsening_signals += 1
+        elif recent_sleep > older_sleep + 3:
+            improving_signals += 1
+
+    if worsening_signals >= 2:
+        trend = "worsening"
+    elif improving_signals >= 2:
+        trend = "improving"
+    else:
+        trend = "stable"
+
+    n_days = len(rows)
+    if n_days >= 6:
+        confidence = "high"
+    elif n_days >= 3:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    return {
+        "n_days": n_days,
+        "hrv_baseline": hrv_baseline,
+        "stress_baseline": stress_baseline,
+        "sleep_baseline": sleep_baseline,
+        "hrv_today": hrv_today,
+        "stress_today": stress_today,
+        "sleep_today": sleep_today,
+        "hrv_status": hrv_status,
+        "stress_status": stress_status,
+        "sleep_status": sleep_status,
+        "trend": trend,
+        "confidence": confidence,
+        "latest_notes": latest.get("notes"),
+    }
+
 def get_recovery_flags(conn):
     """
     Kleine ‘recovery sanity checks’ op basis van daily_metrics:
@@ -1186,8 +1321,7 @@ def get_latest_strava_readiness(conn):
     return row
 
 def build_coach_signals(conn):
-    recovery = get_latest_recovery_input(conn)
-    baselines = get_recovery_baselines(conn)
+    recovery_summary = build_recovery_summary(conn)
 
     tcl_7d = get_tcl_7d(conn)
     strava_status = get_live_strava_status(conn) or {}
@@ -1197,57 +1331,15 @@ def build_coach_signals(conn):
     atl = strava_status.get("fatigue")
 
     signals = {
-        "recovery": recovery,
-        "baselines": baselines,
+        "recovery_summary": recovery_summary,
         "tcl_7d": tcl_7d,
         "ctl": ctl,
         "atl": atl,
         "tsb": tsb,
-        "hrv_flag": None,
-        "stress_flag": None,
-        "sleep_flag": None,
         "load_flag": None,
-        "priority": None,
         "status": "ready",
-        "top_insight": "",
-        "bullets": [],
-        "advice": "",
+        "priority": None,
     }
-
-    if recovery and baselines["n_days"] >= 3:
-        hrv = recovery.get("hrv_rmssd")
-        stress = recovery.get("stress")
-        sleep = recovery.get("sleep_score")
-
-        hrv_base = baselines.get("hrv_baseline")
-        stress_base = baselines.get("stress_baseline")
-        sleep_base = baselines.get("sleep_baseline")
-
-        if hrv is not None and hrv_base is not None:
-            if hrv <= hrv_base * 0.90:
-                signals["hrv_flag"] = "low"
-            elif hrv >= hrv_base * 1.05:
-                signals["hrv_flag"] = "good"
-            else:
-                signals["hrv_flag"] = "normal"
-
-        if stress is not None and stress_base is not None:
-            if stress >= stress_base + 5:
-                signals["stress_flag"] = "high"
-            elif stress <= stress_base - 3:
-                signals["stress_flag"] = "good"
-            else:
-                signals["stress_flag"] = "normal"
-
-        if sleep is not None and sleep_base is not None:
-            if sleep < 60:
-                signals["sleep_flag"] = "low"
-            elif sleep < sleep_base - 7:
-                signals["sleep_flag"] = "below_baseline"
-            elif sleep >= sleep_base:
-                signals["sleep_flag"] = "good"
-            else:
-                signals["sleep_flag"] = "normal"
 
     if tsb is not None:
         if tsb <= -20:
@@ -1263,47 +1355,56 @@ def build_coach_signals(conn):
 
 def build_priority_coach_message(conn):
     s = build_coach_signals(conn)
+    r = s["recovery_summary"]
 
     bullets = []
 
-    if s["hrv_flag"] == "low":
+    if r["hrv_status"] == "low":
         bullets.append("HRV ligt onder je baseline")
-    elif s["hrv_flag"] == "good":
+    elif r["hrv_status"] == "good":
         bullets.append("HRV ligt op of boven je baseline")
 
-    if s["stress_flag"] == "high":
+    if r["stress_status"] == "high":
         bullets.append("Stress ligt hoger dan normaal")
-    elif s["stress_flag"] == "good":
+    elif r["stress_status"] == "good":
         bullets.append("Stress is lager dan normaal")
 
-    if s["sleep_flag"] == "low":
+    if r["sleep_status"] == "low":
         bullets.append("Slaapscore is laag")
-    elif s["sleep_flag"] == "below_baseline":
+    elif r["sleep_status"] == "below_baseline":
         bullets.append("Slaapscore ligt onder je normale niveau")
-    elif s["sleep_flag"] == "good":
+    elif r["sleep_status"] == "good":
         bullets.append("Slaapscore is prima")
 
+    if r["trend"] == "worsening":
+        bullets.append("Hersteltrend verslechtert")
+    elif r["trend"] == "improving":
+        bullets.append("Hersteltrend verbetert")
+
     if s["load_flag"] == "very_fatigued":
-        bullets.append("Strava freshness wijst op stevige vermoeidheid")
+        bullets.append("Strava status wijst op stevige vermoeidheid")
     elif s["load_flag"] == "fatigued":
         bullets.append("Trainingsvermoeidheid loopt op")
     elif s["load_flag"] == "fresh":
         bullets.append("Je bent relatief fris qua trainingsbelasting")
 
-    # prioriteit bepalen
+    if r["latest_notes"]:
+        bullets.append(f"Notitie: {r['latest_notes']}")
+
     red_recovery = sum([
-        1 if s["hrv_flag"] == "low" else 0,
-        1 if s["stress_flag"] == "high" else 0,
-        1 if s["sleep_flag"] in ("low", "below_baseline") else 0,
+        1 if r["hrv_status"] == "low" else 0,
+        1 if r["stress_status"] == "high" else 0,
+        1 if r["sleep_status"] in ("low", "below_baseline") else 0,
+        1 if r["trend"] == "worsening" else 0,
     ])
 
     heavy_load = s["load_flag"] in ("fatigued", "very_fatigued")
 
-    if red_recovery >= 2 and heavy_load:
+    if red_recovery >= 3 and heavy_load:
         status = "recovery_needed"
         priority = "recovery"
-        top_insight = "Zowel herstel als trainingsbelasting geven nu een duidelijke waarschuwing."
-        advice = "Vandaag liefst herstel, wandelen of hooguit heel rustig duurwerk. Geen zware beensessie."
+        top_insight = "Zowel herstel als trainingsbelasting staan nu duidelijk onder druk."
+        advice = "Vandaag liefst herstel, wandelen of heel rustig duurwerk. Geen zware sessie."
     elif red_recovery >= 2:
         status = "light_fatigue"
         priority = "recovery"
@@ -1314,32 +1415,72 @@ def build_priority_coach_message(conn):
             status = "recovery_needed"
             priority = "fatigue"
             top_insight = "Je trainingsbelasting is nu duidelijk hoger dan je herstel aankan."
-            advice = "Neem gas terug: hersteltraining of rustdag is hier het verstandigst."
+            advice = "Neem gas terug: rustdag of hersteltraining is hier het verstandigst."
         else:
             status = "light_fatigue"
             priority = "fatigue"
-            top_insight = "Je herstel is niet slecht, maar trainingsvermoeidheid stapelt zich op."
+            top_insight = "Je herstel is redelijk, maar trainingsvermoeidheid stapelt zich op."
             advice = "Rustige duurtraining of upper body kan prima, zware benenprikkel liever uitstellen."
     else:
-        if s["hrv_flag"] == "good" and s["sleep_flag"] == "good":
+        if r["trend"] == "improving" and r["sleep_status"] == "good":
             status = "fresh"
             priority = "readiness"
-            top_insight = "Je recovery-signalen staan er goed voor."
-            advice = "Goede dag voor kwaliteitstraining, mits je benen ook subjectief oké voelen."
+            top_insight = "Je hersteltrend verbetert en de signalen staan er goed voor."
+            advice = "Goede dag voor een normale tot stevige training, mits je benen ook goed voelen."
         else:
             status = "ready"
             priority = "readiness"
             top_insight = "Er zijn geen sterke rode vlaggen; je bent normaal trainbaar."
             advice = "Normale trainingsdag is prima, met wat ruimte om op gevoel te sturen."
+    
+        why = []
+
+    if r["hrv_status"] == "low":
+        why.append("HRV ligt onder je baseline")
+    elif r["hrv_status"] == "good":
+        why.append("HRV ligt op of boven je baseline")
+
+    if r["stress_status"] == "high":
+        why.append("Stress ligt hoger dan normaal")
+    elif r["stress_status"] == "good":
+        why.append("Stress is lager dan normaal")
+
+    if r["sleep_status"] == "low":
+        why.append("Slaapscore is laag")
+    elif r["sleep_status"] == "below_baseline":
+        why.append("Slaapscore ligt onder je normale niveau")
+    elif r["sleep_status"] == "good":
+        why.append("Slaapscore is prima")
+
+    if s["load_flag"] == "very_fatigued":
+        why.append("Trainingsbelasting is zwaar")
+    elif s["load_flag"] == "fatigued":
+        why.append("Trainingsbelasting loopt op")
+    elif s["load_flag"] == "fresh":
+        why.append("Je bent relatief fris qua trainingsbelasting")
+    else:
+        why.append("Trainingsbelasting is normaal")
 
     return {
         "status": status,
         "priority": priority,
         "top_insight": top_insight,
-        "bullets": bullets[:4],
+        "bullets": bullets[:5],
+        "why": why[:3],
         "advice": advice,
-        "recovery": s["recovery"],
-        "baselines": s["baselines"],
+        "recovery": {
+            "hrv_rmssd": r["hrv_today"],
+            "stress": r["stress_today"],
+            "sleep_score": r["sleep_today"],
+            "notes": r["latest_notes"],
+        },
+        "baselines": {
+            "hrv_baseline": r["hrv_baseline"],
+            "stress_baseline": r["stress_baseline"],
+            "sleep_baseline": r["sleep_baseline"],
+        },
+        "trend": r["trend"],
+        "confidence": r["confidence"],
         "tsb": s["tsb"],
         "ctl": s["ctl"],
         "atl": s["atl"],

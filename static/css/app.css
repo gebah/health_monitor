@@ -1707,3 +1707,100 @@ html[data-theme="dark"] .dial {
   flex-direction: column;
   gap: 18px;
 }
+
+.coach-subheader{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-bottom:12px;
+}
+
+.coach-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:6px;
+}
+
+.coach-meta{
+  font-size:.9rem;
+  color:var(--muted);
+  margin-bottom:12px;
+}
+.coach-status{
+  display:inline-block;
+  padding:6px 12px;
+  border-radius:999px;
+  font-size:.9rem;
+  border:1px solid var(--border);
+}
+
+/* READY = geel/oranje */
+.coach-status--ready{
+  background: rgba(245,158,11,.15);
+  color: var(--ok);
+  border-color: rgba(245,158,11,.3);
+  font-weight:600;
+}
+
+/* RECOVERY NEEDED = rood */
+.coach-status--recovery_needed{
+  background: rgba(239,68,68,.15);
+  color: var(--bad);
+  border-color: rgba(239,68,68,.3);
+  font-weight:700;
+}
+
+/* FRESH = groen (optioneel) */
+.coach-status--fresh{
+  background: rgba(34,197,94,.15);
+  color: var(--good);
+  border-color: rgba(34,197,94,.3);
+  font-weight:600;
+}
+
+.coach-trend-text{
+  margin-top:8px;
+  font-size:.95rem;
+}
+
+.coach-trend-text--improving{
+  color:var(--good);
+  font-weight:600;
+}
+
+.coach-trend-text--stable{
+  color:var(--muted);
+}
+
+.coach-trend-text--worsening{
+  color:var(--bad);
+  font-weight:600;
+}
+
+.coach-why{
+  margin:12px 0 14px;
+  padding:12px 14px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--panel-2);
+}
+
+.coach-why__title{
+  font-size:.82rem;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+
+.coach-why__list{
+  margin:0;
+  padding-left:18px;
+}
+
+.coach-why__list li{
+  margin-bottom:4px;
+  color:var(--text);
+}
