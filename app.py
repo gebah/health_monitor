@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify, redirect, current_app, url_for, flash
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, UTC
 from collector import sync_garmin, sync_strava, sync_all, ensure_manual_recovery_table
 from models import avg_ignore_none, get_daily_metrics_history, calc_body_deltas
 from recovery import get_latest_manual_recovery, get_manual_recovery_series, get_best_recovery_for_day, get_latest_recovery_input, get_recovery_baselines
@@ -72,7 +72,7 @@ def cache_set(conn, key, obj):
         ON CONFLICT(key) DO UPDATE SET
             value=excluded.value,
             updated_at=excluded.updated_at
-    """, (key, json.dumps(obj), datetime.utcnow().isoformat()))
+    """, (key, json.dumps(obj), datetime.now(UTC).isoformat()))
     conn.commit()
 
 def cache_get(conn, key, default=None):
@@ -80,11 +80,12 @@ def cache_get(conn, key, default=None):
     row = conn.execute("SELECT value FROM app_cache WHERE key=?", (key,)).fetchone()
     if not row:
         return default
-    try:
-        return json.loads(row["value"])
-    except Exception:
-        return default
 
+    raw = row["value"]
+    try:
+        return json.loads(raw)
+    except Exception:
+        return raw
 
 def readiness_score(
     latest,
@@ -472,6 +473,34 @@ def calculate_recovery_gauge(
             "tcl": tcl_score,
         }
     }
+
+def time_ago_from_iso(ts):
+    if not ts:
+        return None
+
+    try:
+        dt = datetime.fromisoformat(ts)
+    except Exception:
+        return ts
+
+    # Oude naive timestamps als UTC behandelen
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+
+    delta = datetime.now(UTC) - dt
+    minutes = int(delta.total_seconds() // 60)
+
+    if minutes < 1:
+        return "zojuist"
+    if minutes < 60:
+        return f"{minutes} min geleden"
+
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} uur geleden"
+
+    days = hours // 24
+    return f"{days} d geleden"
 
 @app.context_processor
 def inject_globals():
@@ -1459,8 +1488,6 @@ def tsb_to_score(tsb):
     tsb = max(-30, min(30, float(tsb or 0)))
     return int((tsb + 30) / 60 * 100)
 
-from datetime import datetime, timedelta
-
 def get_hume_weekly_summary(conn):
     rows = conn.execute("""
         SELECT day, weight_kg, body_fat_pct, muscle_mass_kg, lean_mass_kg, visceral_fat_index
@@ -1613,7 +1640,7 @@ def home():
         tl = get_training_load_today(conn)
         flags = get_recovery_flags(conn)
         strava_status = get_live_strava_status(conn)
-
+        
         latest_hume_row = conn.execute(
             "SELECT * FROM hume_body ORDER BY day DESC LIMIT 1"
         ).fetchone()
@@ -1656,7 +1683,7 @@ def home():
             ctl=tl.get("ctl"),
             flags=flags,
         ) if latest else {}
-
+       
         hume_summary = get_hume_weekly_summary(conn)
 
         cache_set(conn, "readiness_header", {
@@ -1715,6 +1742,16 @@ def home():
             "score": strava_status["fatigue"] if strava_status else None,
         },
     }
+    
+    last_strava_sync_obj = cache_get(conn, "last_strava_sync", default=None)
+
+    if isinstance(last_strava_sync_obj, dict):
+        last_strava_sync_raw = last_strava_sync_obj.get("ts")
+    else:
+        last_strava_sync_raw = last_strava_sync_obj
+
+    last_strava_sync = time_ago_from_iso(last_strava_sync_raw)
+    print(last_strava_sync)
 
     return render_template(
         "home.html",
@@ -1737,6 +1774,7 @@ def home():
         coach_v2=coach_v2,
         USER_NAME=USER_NAME,
         USER_HEIGHT=USER_HEIGHT,
+        last_strava_sync=last_strava_sync
     )
     
 @app.route("/hume/charts")

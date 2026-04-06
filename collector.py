@@ -5,7 +5,7 @@ import json
 import os
 import sqlite3
 import time
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, UTC
 from typing import Any
 
 import requests
@@ -418,6 +418,20 @@ def get_strava_access_token(conn: sqlite3.Connection) -> str | None:
 
     return tok["access_token"]
 
+def update_last_strava_sync(conn):
+    print("DEBUG: update_last_strava_sync called")
+    conn.execute("""
+        INSERT INTO app_cache(key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            value=excluded.value,
+            updated_at=excluded.updated_at
+    """, (
+        "last_strava_sync",
+        datetime.now(UTC).isoformat(),
+        datetime.now(UTC).isoformat()
+    ))
+    conn.commit()
 
 def sync_strava_activities(conn: sqlite3.Connection, days: int) -> int:
     access_token = get_strava_access_token(conn)
@@ -569,6 +583,7 @@ def sync_strava(days: int = SYNC_DAYS) -> int:
         n_strava = sync_strava_activities(conn, days)
         rebuild_strava_daily_load(conn)
         rebuild_readiness(conn)
+        update_last_strava_sync(conn)
 
     return n_strava
 

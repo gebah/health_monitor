@@ -166,6 +166,11 @@ data-weekly-kcal-target="17500"
   <section class="card strava-status-card">
     <div class="card__header">
       <h3>Strava status</h3>
+      {% if last_strava_sync %}
+        <span class="muted">
+          Sync: {{ last_strava_sync[:16].replace("T", " ") }}
+        </span>
+      {% endif %}
       <span class="badge badge--{{ strava_status.state if strava_status else 'unknown' }}">
         {{ strava_status.label if strava_status else "Onbekend" }}
       </span>
