@@ -35,6 +35,7 @@ data-weekly-kcal-target="17500"
   <div class="status-strip__item">
     <div class="status-strip__label">Fitness</div>
     <div class="status-strip__value">
+      <span class="badge badge--ok">{{ fitness_label }}</span>
       <strong>{{ home_status.fitness.score if home_status.fitness.score is not none else "—" }}</strong>
     </div>
   </div>
@@ -42,6 +43,7 @@ data-weekly-kcal-target="17500"
   <div class="status-strip__item">
     <div class="status-strip__label">Vermoeidheid</div>
     <div class="status-strip__value">
+      <span class="badge badge--bad">{{ fatigue_label }}</span>
       <strong>{{ home_status.fatigue.score if home_status.fatigue.score is not none else "—" }}</strong>
     </div>
   </div>
@@ -74,14 +76,6 @@ data-weekly-kcal-target="17500"
         {% endfor %}
       </ul>
     </div>
-    {% endif %}
-
-    {% if coach_v2.bullets %}
-    <ul class="compact-list compact-list--coach">
-      {% for item in coach_v2.bullets %}
-      <li>{{ item }}</li>
-      {% endfor %}
-    </ul>
     {% endif %}
 
     <p><strong>Hersteltrend</strong></br></p>

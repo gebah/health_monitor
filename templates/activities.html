@@ -4,26 +4,143 @@
 {% block content %}
 <h1>Activities</h1>
 
-<form method="get" class="filters">
-  <label>Activiteiten:</label>
-  <select name="acts" onchange="this.form.submit()">
-    <option value="10" {{ "selected" if act_limit==10 else "" }}>10</option>
-    <option value="25" {{ "selected" if act_limit==25 else "" }}>25</option>
-    <option value="50" {{ "selected" if act_limit==50 else "" }}>50</option>
-  </select>
+<form method="get" class="filters filters--activities">
+  <input type="hidden" name="preset" value="{{ preset or '' }}">
 
-  <label class="ml12">Type:</label>
-  <select name="type" onchange="this.form.submit()">
-    <option value="all" {{ "selected" if activity_type=="all" else "" }}>All</option>
-    {% for t in types %}
-      <option value="{{ t }}" {{ "selected" if activity_type==t else "" }}>{{ t }}</option>
-    {% endfor %}
-  </select>
+  <label>
+    <span>Van</span>
+    <input type="date" name="from" value="{{ date_from }}">
+  </label>
+
+  <label>
+    <span>Tot</span>
+    <input type="date" name="to" value="{{ date_to }}">
+  </label>
+
+  <label>
+    <span>Type</span>
+    <select name="type">
+      <option value="all" {% if activity_type == "all" %}selected{% endif %}>Alles</option>
+      {% for t in types %}
+        <option value="{{ t }}" {% if activity_type == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>
+    <span>Max activiteiten</span>
+    <input type="number" name="acts" value="{{ act_limit }}" min="1" step="1">
+  </label>
+
+  <div class="filters__actions activity-actions">
+    <button type="submit" class="btn">Filter</button>
+    <a class="btn btn--ghost" href="{{ url_for('activities_page') }}">Reset</a>
+  </div>
 </form>
+
+<div class="activity-toolbar">
+  <div class="activity-toolbar__group">
+    <span class="activity-toolbar__label">Snelle periodes</span>
+
+    <a
+      class="chip {% if preset == 'year' %}is-active{% endif %}"
+      href="{{ url_for('activities_page', preset='year', type=activity_type, acts=act_limit) }}"
+    >
+      Vanaf 1 januari
+    </a>
+
+    <a
+      class="chip {% if preset == 'month' %}is-active{% endif %}"
+      href="{{ url_for('activities_page', preset='month', type=activity_type, acts=act_limit) }}"
+    >
+      Deze maand
+    </a>
+
+    <a
+      class="chip {% if preset == '30d' %}is-active{% endif %}"
+      href="{{ url_for('activities_page', preset='30d', type=activity_type, acts=act_limit) }}"
+    >
+      Laatste 30 dagen
+    </a>
+
+    <a
+      class="chip {% if preset == 'all' %}is-active{% endif %}"
+      href="{{ url_for('activities_page', preset='all', type=activity_type, acts=act_limit) }}"
+    >
+      Alles
+    </a>
+  </div>
+</div>
+
+<div class="card activity-context">
+  <div class="activity-context__item">
+    <span class="activity-context__label">Periode</span>
+    <strong>
+      {% if date_from and date_to %}
+        {{ date_from }} t/m {{ date_to }}
+      {% elif date_from %}
+        Vanaf {{ date_from }}
+      {% elif date_to %}
+        Tot {{ date_to }}
+      {% else %}
+        Alles
+      {% endif %}
+    </strong>
+  </div>
+
+  <div class="activity-context__item">
+    <span class="activity-context__label">Type</span>
+    <strong>{{ activity_type if activity_type != "all" else "Alle activiteiten" }}</strong>
+  </div>
+</div>
+
+<div class="card activity-summary-card">
+  <div class="activity-summary-grid">
+    <div class="activity-stat">
+      <div class="metric-title">Activiteiten</div>
+      <div class="metric-value">{{ summary.count or 0 }}</div>
+    </div>
+
+    <div class="activity-stat">
+      <div class="metric-title">Afstand</div>
+      <div class="metric-value">{{ summary.distance_km or 0 }} km</div>
+    </div>
+
+    <div class="activity-stat">
+      <div class="metric-title">Tijd</div>
+      <div class="metric-value">{{ summary.duration_h or 0 }} u</div>
+    </div>
+  </div>
+</div>
+
+{% if weekly_totals and weekly_totals|length %}
+  <div class="card weekly-overview">
+    <div class="section-head">
+      <h3>Weektotalen</h3>
+    </div>
+
+    <div class="weekly-grid">
+      {% for w in weekly_totals %}
+        <div class="weekly-tile">
+          <div class="weekly-tile__week">{{ w.week_label }}</div>
+          <div class="weekly-tile__meta">vanaf {{ w.week_start }}</div>
+          <div class="weekly-tile__value">{{ w.distance_km }} km</div>
+          <div class="weekly-tile__sub">
+            {{ w.activity_count }} activiteiten · {{ w.duration_h }} u
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="weekly-chart-wrap">
+      <div id="weeklyDistanceChart" class="mini-chart"></div>
+    </div>
+  </div>
+{% endif %}
 
 {% if latest_activities and latest_activities|length %}
   <div class="card">
-    <table>
+    <table class="table">
       <thead>
         <tr>
           <th>Datum</th>
@@ -31,51 +148,29 @@
           <th>Naam</th>
           <th>Afstand</th>
           <th>Duur</th>
-          <th>HR</th>
-          <th>Power</th>
-          <th>TE</th>
-          <th>VO2</th>
         </tr>
       </thead>
       <tbody>
         {% for a in latest_activities %}
           <tr class="activity-row">
-            <td>{{ a.start_time_local }}</td>
-            <td>{{ a.activity_type or "—" }}</td>
-            <td class="activity-main">{{ a.activity_name or "—" }}</td>
+            <td>{{ a.get('start_time_local') or "—" }}</td>
+            <td>{{ a.get('activity_type') or "—" }}</td>
+            <td class="activity-main">{{ a.get('activity_name') or "—" }}</td>
+
             <td>
-              {% if a.distance_m is not none %}
-                {{ (a.distance_m / 1000) | round(1) }} km
-              {% else %}—{% endif %}
+              {% if a.get('distance_m') is not none %}
+                {{ (a.get('distance_m') / 1000) | round(1) }} km
+              {% else %}
+                —
+              {% endif %}
             </td>
+
             <td>
-              {% if a.duration_s is not none %}
-                {{ (a.duration_s / 60) | round(0) }} min
-              {% else %}—{% endif %}
-            </td>
-            <td>
-              {% if a.avg_hr is not none %}
-                {{ a.avg_hr | round(0) }}
-              {% else %}—{% endif %}
-              /
-              {% if a.max_hr is not none %}
-                {{ a.max_hr | round(0) }}
-              {% else %}—{% endif %}
-            </td>
-            <td>
-              {% if a.avg_power is not none %}
-                {{ a.avg_power | round(0) }} w
-              {% else %}—{% endif %}
-            </td>
-            <td>
-              {% if a.training_effect is not none %}
-                {{ a.training_effect | round(1) }}
-              {% else %}—{% endif %}
-            </td>
-            <td>
-              {% if a.vo2max_value is not none %}
-                {{ a.vo2max_value | round(1) }}
-              {% else %}—{% endif %}
+              {% if a.get('duration_s') is not none %}
+                {{ (a.get('duration_s') / 60) | round(0) }} min
+              {% else %}
+                —
+              {% endif %}
             </td>
           </tr>
         {% endfor %}
@@ -85,8 +180,51 @@
 {% else %}
   <div class="card">Geen activiteiten gevonden.</div>
 {% endif %}
+
+{% if total_pages > 1 %}
+  <div class="pagination">
+    <div class="pagination__info">
+      Pagina {{ page }} van {{ total_pages }} · {{ total_count }} activiteiten
+    </div>
+
+    <div class="pagination__actions">
+      {% if page > 1 %}
+        <a class="btn btn--ghost"
+           href="{{ url_for('activities_page',
+                            page=page-1,
+                            acts=act_limit,
+                            type=activity_type,
+                            from=date_from,
+                            to=date_to,
+                            preset=preset) }}">
+          Vorige
+        </a>
+      {% endif %}
+
+      {% if page < total_pages %}
+        <a class="btn btn--ghost"
+           href="{{ url_for('activities_page',
+                            page=page+1,
+                            acts=act_limit,
+                            type=activity_type,
+                            from=date_from,
+                            to=date_to,
+                            preset=preset) }}">
+          Volgende
+        </a>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
+{% if weekly_totals and weekly_totals|length %}
+  <script id="weekly-totals-data" type="application/json">
+    {{ weekly_totals | tojson }}
+  </script>
+{% endif %}
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
 {% endblock %}

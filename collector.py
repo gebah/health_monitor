@@ -433,13 +433,12 @@ def update_last_strava_sync(conn):
     ))
     conn.commit()
 
-def sync_strava_activities(conn: sqlite3.Connection, days: int) -> int:
+def sync_strava_activities(conn: sqlite3.Connection, days: int | None = 30) -> int:
     access_token = get_strava_access_token(conn)
     if not access_token:
         return 0
 
     headers = {"Authorization": f"Bearer {access_token}"}
-    after = int(time.time()) - days * 86400
 
     per_page = 200
     page = 1
@@ -447,10 +446,14 @@ def sync_strava_activities(conn: sqlite3.Connection, days: int) -> int:
     now = datetime.now().isoformat(timespec="seconds")
 
     while True:
+        params = {"page": page, "per_page": per_page}
+        if days is not None and days > 0:
+            params["after"] = int(time.time()) - days * 86400
+
         r = requests.get(
             "https://www.strava.com/api/v3/athlete/activities",
             headers=headers,
-            params={"after": after, "page": page, "per_page": per_page},
+            params=params,
             timeout=30,
         )
         r.raise_for_status()

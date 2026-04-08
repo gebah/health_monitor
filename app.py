@@ -4,7 +4,6 @@ from collector import sync_garmin, sync_strava, sync_all, ensure_manual_recovery
 from models import avg_ignore_none, get_daily_metrics_history, calc_body_deltas
 from recovery import get_latest_manual_recovery, get_manual_recovery_series, get_best_recovery_for_day, get_latest_recovery_input, get_recovery_baselines
 
-
 import sqlite3
 import json
 import csv
@@ -1358,35 +1357,51 @@ def build_priority_coach_message(conn):
     r = s["recovery_summary"]
 
     bullets = []
-
+    why = []
+        
     if r["hrv_status"] == "low":
+        why.append("HRV ligt onder je baseline")
         bullets.append("HRV ligt onder je baseline")
     elif r["hrv_status"] == "good":
-        bullets.append("HRV ligt op of boven je baseline")
+        why.append("HRV ligt op of boven je baseline")
+        bullets.append("HRV ligt op of boven je baseline")        
 
     if r["stress_status"] == "high":
-        bullets.append("Stress ligt hoger dan normaal")
+        why.append("Stress ligt hoger dan normaal")
+        bullets.append("Stress ligt hoger dan normaal")        
     elif r["stress_status"] == "good":
+        why.append("Stress is lager dan normaal")
         bullets.append("Stress is lager dan normaal")
 
     if r["sleep_status"] == "low":
-        bullets.append("Slaapscore is laag")
+        why.append("Slaapscore is laag")
+        bullets.append("Slaapscore is laag")        
     elif r["sleep_status"] == "below_baseline":
-        bullets.append("Slaapscore ligt onder je normale niveau")
+        why.append("Slaapscore ligt onder je normale niveau")
+        bullets.append("Slaapscore ligt onder je normale niveau")        
     elif r["sleep_status"] == "good":
-        bullets.append("Slaapscore is prima")
-
+        why.append("Slaapscore is prima")
+        bullets.append("Slaapscore is prima")       
+        
     if r["trend"] == "worsening":
+        why.append("Hersteltrend verslechtert")
         bullets.append("Hersteltrend verslechtert")
     elif r["trend"] == "improving":
-        bullets.append("Hersteltrend verbetert")
+        why.append("Hersteltrend verbetert")
+        bullets.append("Hersteltrend verbetert")         
 
     if s["load_flag"] == "very_fatigued":
+        why.append("Trainingsbelasting is zwaar")
         bullets.append("Strava status wijst op stevige vermoeidheid")
     elif s["load_flag"] == "fatigued":
+        why.append("Trainingsbelasting loopt op")
         bullets.append("Trainingsvermoeidheid loopt op")
     elif s["load_flag"] == "fresh":
+        why.append("Je bent relatief fris qua trainingsbelasting")
         bullets.append("Je bent relatief fris qua trainingsbelasting")
+    else:
+        why.append("Trainingsbelasting is normaal")
+        bullets.append("Trainingsbelasting is normaal")
 
     if r["latest_notes"]:
         bullets.append(f"Notitie: {r['latest_notes']}")
@@ -1432,34 +1447,7 @@ def build_priority_coach_message(conn):
             priority = "readiness"
             top_insight = "Er zijn geen sterke rode vlaggen; je bent normaal trainbaar."
             advice = "Normale trainingsdag is prima, met wat ruimte om op gevoel te sturen."
-    
-        why = []
 
-    if r["hrv_status"] == "low":
-        why.append("HRV ligt onder je baseline")
-    elif r["hrv_status"] == "good":
-        why.append("HRV ligt op of boven je baseline")
-
-    if r["stress_status"] == "high":
-        why.append("Stress ligt hoger dan normaal")
-    elif r["stress_status"] == "good":
-        why.append("Stress is lager dan normaal")
-
-    if r["sleep_status"] == "low":
-        why.append("Slaapscore is laag")
-    elif r["sleep_status"] == "below_baseline":
-        why.append("Slaapscore ligt onder je normale niveau")
-    elif r["sleep_status"] == "good":
-        why.append("Slaapscore is prima")
-
-    if s["load_flag"] == "very_fatigued":
-        why.append("Trainingsbelasting is zwaar")
-    elif s["load_flag"] == "fatigued":
-        why.append("Trainingsbelasting loopt op")
-    elif s["load_flag"] == "fresh":
-        why.append("Je bent relatief fris qua trainingsbelasting")
-    else:
-        why.append("Trainingsbelasting is normaal")
 
     return {
         "status": status,
@@ -1683,6 +1671,24 @@ def get_hume_weekly_summary(conn):
         "previous": previous,
     }
     
+def get_fitness_label(fitness):
+    if fitness > 60:
+        return "High"
+    elif fitness > 40:
+        return "Normal"
+    else:
+        return "Low"
+
+def get_fatigue_label(fatigue):
+    if fatigue > 70:
+        return "Very high"
+    elif fatigue > 55:
+        return "High"
+    elif fatigue > 40:
+        return "Normal"
+    else:
+        return "Low"
+    
 def build_coach_insight(hume_summary=None, readiness_header=None, strava_status=None):
     insight = {
         "headline": "Nog onvoldoende data voor een duidelijke analyse.",
@@ -1779,6 +1785,12 @@ def home():
 
         tcl_7d = get_tcl_7d(conn)
         tl = get_training_load_today(conn)
+        fitness = tl.get("ctl")
+        fatigue = tl.get("atl")
+        form = tl.get("tsb")
+
+        fitness_label = get_fitness_label(fitness)
+        fatigue_label = get_fatigue_label(fatigue)
         flags = get_recovery_flags(conn)
         strava_status = get_live_strava_status(conn)
         
@@ -1814,6 +1826,8 @@ def home():
                 "tone": "ok",
                 "score": None,
             }
+        
+
 
         readiness = readiness_score(
             latest,
@@ -1823,8 +1837,8 @@ def home():
             atl=tl.get("atl"),
             ctl=tl.get("ctl"),
             flags=flags,
-        ) if latest else {}
-       
+        ) if latest else {}        
+
         hume_summary = get_hume_weekly_summary(conn)
 
         cache_set(conn, "readiness_header", {
@@ -1881,7 +1895,7 @@ def home():
             "label": "Vermoeidheid",
             "state": "ok",
             "score": strava_status["fatigue"] if strava_status else None,
-        },
+        },        
     }
     
     last_strava_sync_obj = cache_get(conn, "last_strava_sync", default=None)
@@ -1892,7 +1906,7 @@ def home():
         last_strava_sync_raw = last_strava_sync_obj
 
     last_strava_sync = time_ago_from_iso(last_strava_sync_raw)
-    print(last_strava_sync)
+
 
     return render_template(
         "home.html",
@@ -1915,7 +1929,9 @@ def home():
         coach_v2=coach_v2,
         USER_NAME=USER_NAME,
         USER_HEIGHT=USER_HEIGHT,
-        last_strava_sync=last_strava_sync
+        last_strava_sync=last_strava_sync,
+        fitness_label=fitness_label,
+        fatigue_label=fatigue_label
     )
     
 @app.route("/hume/charts")
@@ -1940,53 +1956,85 @@ def training_load_page():
         days=days
     )
 
+from datetime import date, timedelta
+
 @app.route("/activities")
 def activities_page():
     act_limit = int(request.args.get("acts", 50))
+    if act_limit <= 0:
+        act_limit = 50
+
+    page = int(request.args.get("page", 1))
+    if page < 1:
+        page = 1
+
     activity_type = request.args.get("type", "all")
+    date_from = request.args.get("from", "").strip()
+    date_to = request.args.get("to", "").strip()
+    preset = request.args.get("preset", "").strip()
+
+    today = date.today()
+
+    if preset == "year":
+        date_from = f"{today.year}-01-01"
+        date_to = today.isoformat()
+    elif preset == "month":
+        date_from = today.replace(day=1).isoformat()
+        date_to = today.isoformat()
+    elif preset == "30d":
+        date_from = (today - timedelta(days=30)).isoformat()
+        date_to = today.isoformat()
+    elif preset == "all":
+        date_from = ""
+        date_to = ""
+
+    where_sql = "WHERE 1=1"
+    where_params = []
+
+    if activity_type != "all":
+        where_sql += " AND type = ?"
+        where_params.append(activity_type)
+
+    if date_from:
+        where_sql += " AND date(start_time_local) >= date(?)"
+        where_params.append(date_from)
+
+    if date_to:
+        where_sql += " AND date(start_time_local) <= date(?)"
+        where_params.append(date_to)
+
+    offset = (page - 1) * act_limit
+
+    summary_query = f"""
+        SELECT
+            COUNT(*) AS count,
+            COALESCE(SUM(distance_m), 0) AS total_distance_m,
+            COALESCE(SUM(moving_time_s), 0) AS total_duration_s
+        FROM strava_activities
+        {where_sql}
+    """
+
+    list_query = f"""
+        SELECT
+            strava_activity_id AS activity_id,
+            start_time_local,
+            type AS activity_type,
+            name AS activity_name,
+            distance_m,
+            moving_time_s AS duration_s,
+            tcl
+        FROM strava_activities
+        {where_sql}
+        ORDER BY start_time_local DESC
+        LIMIT ? OFFSET ?
+    """
 
     with get_conn() as conn:
-        if activity_type != "all":
-            latest_activities = conn.execute("""
-                SELECT
-                    strava_activity_id AS activity_id,
-                    start_time_local,
-                    type AS activity_type,
-                    name AS activity_name,
-                    distance_m,
-                    moving_time_s AS duration_s,
-                    NULL AS avg_hr,
-                    NULL AS max_hr,
-                    NULL AS avg_power,
-                    NULL AS training_effect,
-                    NULL AS vo2max_value,
-                    suffer_score,
-                    tcl
-                FROM strava_activities
-                WHERE type = ?
-                ORDER BY start_time_local DESC
-                LIMIT ?
-            """, (activity_type, act_limit)).fetchall()
-        else:
-            latest_activities = conn.execute("""
-                SELECT
-                    strava_activity_id AS activity_id,
-                    start_time_local,
-                    type AS activity_type,
-                    name AS activity_name,
-                    distance_m,
-                    moving_time_s AS duration_s,
-                    NULL AS avg_hr,
-                    NULL AS max_hr,
-                    NULL AS avg_power,
-                    NULL AS training_effect,
-                    NULL AS vo2max_value,
-                    suffer_score,
-                    tcl
-                FROM strava_activities
-                ORDER BY start_time_local DESC
-                LIMIT ?
-            """, (act_limit,)).fetchall()
+        summary_row = conn.execute(summary_query, where_params).fetchone()
+        latest_activities = conn.execute(
+            list_query,
+            [*where_params, act_limit, offset]
+        ).fetchall()
 
         types = [
             r["t"] for r in conn.execute("""
@@ -1996,14 +2044,63 @@ def activities_page():
                 ORDER BY t
             """).fetchall()
         ]
+        
+        weekly_rows = conn.execute(f"""
+            SELECT
+                strftime('%Y-%W', start_time_local) AS year_week,
+                MIN(date(start_time_local)) AS week_start,
+                COUNT(*) AS activity_count,
+                COALESCE(SUM(distance_m), 0) AS total_distance_m,
+                COALESCE(SUM(moving_time_s), 0) AS total_duration_s
+            FROM strava_activities
+            {where_sql}
+            GROUP BY strftime('%Y-%W', start_time_local)
+            ORDER BY year_week DESC
+            LIMIT 8
+        """, where_params).fetchall()
+
+    total_count = summary_row["count"] or 0
+    total_pages = max(1, (total_count + act_limit - 1) // act_limit)
+
+    activities = [dict(r) for r in latest_activities]
+    
+    weekly_totals = []
+    for r in weekly_rows:
+        year_week = r["year_week"] or ""
+        week_label = year_week.replace("-", "-W") if year_week else ""
+
+        weekly_totals.append({
+            "year_week": year_week,
+            "week_label": week_label,
+            "week_start": r["week_start"],
+            "activity_count": r["activity_count"] or 0,
+            "distance_km": round((r["total_distance_m"] or 0) / 1000, 1),
+            "duration_h": round((r["total_duration_s"] or 0) / 3600, 1),
+        })
+
+    weekly_totals = list(reversed(weekly_totals))
+
+    summary = {
+        "count": total_count,
+        "distance_km": round((summary_row["total_distance_m"] or 0) / 1000, 1),
+        "duration_h": round((summary_row["total_duration_s"] or 0) / 3600, 1)
+    }
 
     return render_template(
         "activities.html",
         active_page="activities",
-        latest_activities=[dict(r) for r in latest_activities],
+        latest_activities=activities,
         types=types,
         act_limit=act_limit,
         activity_type=activity_type,
+        date_from=date_from,
+        date_to=date_to,
+        preset=preset,
+        summary=summary,
+        page=page,
+        total_pages=total_pages,
+        total_count=total_count,
+        weekly_totals=weekly_totals,
     )
 
 @app.route("/api/activities")

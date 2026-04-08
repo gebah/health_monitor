@@ -50,3 +50,46 @@
     });
   }
 })();
+
+document.addEventListener("DOMContentLoaded", () => {
+  const weeklyDataEl = document.getElementById("weekly-totals-data");
+  const chartEl = document.getElementById("weeklyDistanceChart");
+
+  if (weeklyDataEl && chartEl && window.Plotly) {
+    const weeklyTotals = JSON.parse(weeklyDataEl.textContent);
+
+    const x = weeklyTotals.map(w => w.week_label);
+    const y = weeklyTotals.map(w => w.distance_km);
+
+    Plotly.newPlot(
+      chartEl,
+      [{
+        x,
+        y,
+        type: "scatter",
+        mode: "lines+markers",
+        hovertemplate: "%{x}<br>%{y} km<extra></extra>"
+      }],
+      {
+        margin: { t: 10, r: 10, b: 35, l: 40 },
+        height: 240,
+        paper_bgcolor: "rgba(0,0,0,0)",
+        plot_bgcolor: "rgba(0,0,0,0)",
+        showlegend: false,
+        xaxis: {
+          title: "",
+          fixedrange: true,
+          type: "category"
+        },
+        yaxis: {
+          title: "km",
+          fixedrange: true
+        }
+      },
+      {
+        displayModeBar: false,
+        responsive: true
+      }
+    );
+  }
+});
