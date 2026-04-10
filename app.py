@@ -1671,6 +1671,7 @@ def get_hume_weekly_summary(conn):
         "previous": previous,
     }
     
+  
 def get_fitness_label(fitness):
     if fitness > 60:
         return "High"
@@ -1767,7 +1768,57 @@ def build_coach_insight(hume_summary=None, readiness_header=None, strava_status=
     else:
         insight["advice"] = "Blijf de trend nog even volgen en stuur vooral op herstelkwaliteit, eiwitinname en trainingsdosering."
 
-    return insight    
+    return insight
+
+def calc_metrics(a):
+    if not a:
+        return None
+
+    if not isinstance(a, dict):
+        a = dict(a)
+
+    distance_km = (a.get("distance_m") or 0) / 1000.0
+    duration_h = (a.get("moving_time_s") or 0) / 3600.0
+    speed_kmh = distance_km / duration_h if duration_h > 0 else 0.0
+
+    return {
+        "distance_km": round(distance_km, 1),
+        "speed_kmh": round(speed_kmh, 1),
+        "suffer": round(a.get("suffer_score") or 0, 1),
+    }
+
+
+def ride_kind_label(kind: str | None) -> str:
+    return {
+        "road": "Road",
+        "gravel": "Gravel",
+        "mountain": "MTB",
+    }.get(kind, "Ride")
+
+
+def build_ride_insight(last_metrics, prev_metrics, comparison, ride_kind):
+    if not last_metrics or not prev_metrics or not comparison:
+        return None
+
+    kind_label = ride_kind_label(ride_kind).lower()
+
+    speed_diff = comparison["speed_diff"]
+    suffer_diff = comparison["suffer_diff"]
+    distance_diff = comparison["distance_diff"]
+
+    if speed_diff > 0 and suffer_diff <= 0:
+        return f"Sterker dan je vorige {kind_label}rit: hogere snelheid bij gelijke of lagere belasting."
+    if speed_diff > 0 and suffer_diff > 0:
+        return f"Sneller dan je vorige {kind_label}rit, maar het kostte ook duidelijk meer belasting."
+    if speed_diff < 0 and suffer_diff > 0:
+        return f"Zwaarder dan je vorige {kind_label}rit, met lagere snelheid en hogere belasting."
+    if abs(speed_diff) <= 0.2 and abs(suffer_diff) <= 5:
+        return f"Vrijwel vergelijkbaar met je vorige {kind_label}rit."
+    if distance_diff > 5:
+        return f"Langere {kind_label}rit dan de vorige, dus vergelijk de snelheid met wat nuance."
+    if speed_diff < 0:
+        return f"Iets langzamer dan je vorige {kind_label}rit."
+    return f"Interessante vergelijking met je vorige {kind_label}rit."
 
 @app.route("/")
 def home():
@@ -1793,7 +1844,7 @@ def home():
         fatigue_label = get_fatigue_label(fatigue)
         flags = get_recovery_flags(conn)
         strava_status = get_live_strava_status(conn)
-        
+
         latest_hume_row = conn.execute(
             "SELECT * FROM hume_body ORDER BY day DESC LIMIT 1"
         ).fetchone()
@@ -1826,8 +1877,53 @@ def home():
                 "tone": "ok",
                 "score": None,
             }
-        
 
+        last_ride_row = conn.execute("""
+            SELECT *
+            FROM strava_activities
+            WHERE ride_kind IN ('road', 'gravel', 'mountain')
+            ORDER BY start_time_local DESC
+            LIMIT 1
+        """).fetchone()
+
+        last_ride = dict(last_ride_row) if last_ride_row else None
+
+        last_ride_kind = last_ride.get("ride_kind") if last_ride else None
+        last_ride_kind_label = ride_kind_label(last_ride_kind)
+
+        prev_ride = None
+        if last_ride:
+            prev_ride_row = conn.execute("""
+                SELECT *
+                FROM strava_activities
+                WHERE ride_kind = ?
+                  AND start_time_local < ?
+                ORDER BY start_time_local DESC
+                LIMIT 1
+            """, (
+                last_ride["ride_kind"],
+                last_ride["start_time_local"],
+            )).fetchone()
+
+            prev_ride = dict(prev_ride_row) if prev_ride_row else None
+
+        last_metrics = calc_metrics(last_ride)
+        prev_metrics = calc_metrics(prev_ride)
+
+        comparison = None
+        if last_metrics and prev_metrics:
+            comparison = {
+                "distance_diff": round(last_metrics["distance_km"] - prev_metrics["distance_km"], 1),
+                "speed_diff": round(last_metrics["speed_kmh"] - prev_metrics["speed_kmh"], 1),
+                "suffer_diff": round(last_metrics["suffer"] - prev_metrics["suffer"], 1),
+            }
+
+        ride_insight = build_ride_insight(
+            last_metrics=last_metrics,
+            prev_metrics=prev_metrics,
+            comparison=comparison,
+            ride_kind=last_ride_kind,
+        )
 
         readiness = readiness_score(
             latest,
@@ -1837,7 +1933,7 @@ def home():
             atl=tl.get("atl"),
             ctl=tl.get("ctl"),
             flags=flags,
-        ) if latest else {}        
+        ) if latest else {}
 
         hume_summary = get_hume_weekly_summary(conn)
 
@@ -1856,57 +1952,56 @@ def home():
             strava_status=strava_status,
         )
 
-    safe_hume = latest_hume or {}
+        safe_hume = latest_hume or {}
 
-    deltas = calc_body_deltas(
-        safe_hume,
-        target_weight=90,
-        target_lean=70,
-        target_bf=17.5,
-        height_m=USER_HEIGHT,
-    )
+        deltas = calc_body_deltas(
+            safe_hume,
+            target_weight=90,
+            target_lean=70,
+            target_bf=17.5,
+            height_m=USER_HEIGHT,
+        )
 
-    delta_weight = round(deltas.get("delta_weight"), 1) if deltas.get("delta_weight") is not None else None
-    delta_lean = round(deltas.get("delta_lean"), 1) if deltas.get("delta_lean") is not None else None
-    delta_bf = round(deltas.get("delta_bf"), 1) if deltas.get("delta_bf") is not None else None
-    lbmi = deltas.get("lbmi")
-    delta_lbmi = deltas.get("delta_lbmi")
+        delta_weight = round(deltas.get("delta_weight"), 1) if deltas.get("delta_weight") is not None else None
+        delta_lean = round(deltas.get("delta_lean"), 1) if deltas.get("delta_lean") is not None else None
+        delta_bf = round(deltas.get("delta_bf"), 1) if deltas.get("delta_bf") is not None else None
+        lbmi = deltas.get("lbmi")
+        delta_lbmi = deltas.get("delta_lbmi")
 
-    lbmi_display = round(lbmi, 2) if lbmi is not None else None
-    delta_lbmi_display = round(delta_lbmi, 2) if delta_lbmi is not None else None
+        lbmi_display = round(lbmi, 2) if lbmi is not None else None
+        delta_lbmi_display = round(delta_lbmi, 2) if delta_lbmi is not None else None
 
-    home_status = {
-        "advice": {
-            "label": training_advice["label"],
-            "state": training_advice["tone"],
-            "score": training_advice.get("score"),
-        },
-        "form": {
-            "label": strava_status["label"] if strava_status else "-",
-            "state": strava_status["state"] if strava_status else "unknown",
-            "score": strava_status["form"] if strava_status else None,
-        },
-        "fitness": {
-            "label": "Fitness",
-            "state": "good",
-            "score": strava_status["fitness"] if strava_status else None,
-        },
-        "fatigue": {
-            "label": "Vermoeidheid",
-            "state": "ok",
-            "score": strava_status["fatigue"] if strava_status else None,
-        },        
-    }
-    
-    last_strava_sync_obj = cache_get(conn, "last_strava_sync", default=None)
+        home_status = {
+            "advice": {
+                "label": training_advice["label"],
+                "state": training_advice["tone"],
+                "score": training_advice.get("score"),
+            },
+            "form": {
+                "label": strava_status["label"] if strava_status else "-",
+                "state": strava_status["state"] if strava_status else "unknown",
+                "score": strava_status["form"] if strava_status else None,
+            },
+            "fitness": {
+                "label": "Fitness",
+                "state": "good",
+                "score": strava_status["fitness"] if strava_status else None,
+            },
+            "fatigue": {
+                "label": "Vermoeidheid",
+                "state": "ok",
+                "score": strava_status["fatigue"] if strava_status else None,
+            },
+        }
 
-    if isinstance(last_strava_sync_obj, dict):
-        last_strava_sync_raw = last_strava_sync_obj.get("ts")
-    else:
-        last_strava_sync_raw = last_strava_sync_obj
+        last_strava_sync_obj = cache_get(conn, "last_strava_sync", default=None)
 
-    last_strava_sync = time_ago_from_iso(last_strava_sync_raw)
+        if isinstance(last_strava_sync_obj, dict):
+            last_strava_sync_raw = last_strava_sync_obj.get("ts")
+        else:
+            last_strava_sync_raw = last_strava_sync_obj
 
+        last_strava_sync = time_ago_from_iso(last_strava_sync_raw)
 
     return render_template(
         "home.html",
@@ -1931,8 +2026,17 @@ def home():
         USER_HEIGHT=USER_HEIGHT,
         last_strava_sync=last_strava_sync,
         fitness_label=fitness_label,
-        fatigue_label=fatigue_label
+        fatigue_label=fatigue_label,
+        last_ride=last_ride,
+        prev_ride=prev_ride,
+        last_ride_kind=last_ride_kind,
+        last_ride_kind_label=last_ride_kind_label,
+        last_metrics=last_metrics,
+        prev_metrics=prev_metrics,
+        comparison=comparison,
+        ride_insight=ride_insight,
     )
+
     
 @app.route("/hume/charts")
 def hume_charts():

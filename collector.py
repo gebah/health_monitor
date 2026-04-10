@@ -467,6 +467,17 @@ def sync_strava_activities(conn: sqlite3.Connection, days: int | None = 30) -> i
             suffer = a.get("suffer_score")
             tcl = None
 
+            sport_type = a.get("sport_type")
+            base_type = a.get("type")
+
+            ride_kind = None
+            if sport_type == "Ride":
+                ride_kind = "road"
+            elif sport_type == "GravelRide":
+                ride_kind = "gravel"
+            elif sport_type == "MountainBikeRide":
+                ride_kind = "mountain"
+
             weighted = a.get("weighted_average_watts")
             if STRAVA_FTP > 0 and weighted is not None and moving is not None:
                 intensity = float(weighted) / STRAVA_FTP
@@ -480,15 +491,27 @@ def sync_strava_activities(conn: sqlite3.Connection, days: int | None = 30) -> i
 
             conn.execute("""
                 INSERT OR REPLACE INTO strava_activities (
-                    strava_activity_id, start_time_local, name, type,
-                    distance_m, moving_time_s, elapsed_time_s, suffer_score,
-                    tcl, raw_json, synced_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    strava_activity_id,
+                    start_time_local,
+                    name,
+                    type,
+                    sport_type,
+                    ride_kind,
+                    distance_m,
+                    moving_time_s,
+                    elapsed_time_s,
+                    suffer_score,
+                    tcl,
+                    raw_json,
+                    synced_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 a["id"],
                 a.get("start_date_local"),
                 a.get("name"),
-                a.get("type"),
+                base_type,
+                sport_type,
+                ride_kind,
                 a.get("distance"),
                 a.get("moving_time"),
                 a.get("elapsed_time"),

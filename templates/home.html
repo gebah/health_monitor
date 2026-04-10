@@ -180,6 +180,81 @@ data-weekly-kcal-target="17500"
   </div>
 </section>
 
+{% if last_ride and last_metrics %}
+<div class="card ride-analysis-card">
+  <div class="ride-analysis__header">
+    <div>
+      <h3>Laatste rit analyse</h3>
+      <div class="ride-analysis__meta">
+        <strong>{{ last_ride.get('name') or last_ride.get('activity_name') or "Laatste rit" }}</strong>
+        <span>· {{ last_ride_kind_label or "Ride" }}</span>
+        <span>· {{ last_ride.get('start_time_local')[:10] if last_ride.get('start_time_local') else "—" }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="ride-analysis__grid">
+    <div class="ride-metric">
+      <div class="ride-metric__label">Afstand</div>
+      <div class="ride-metric__current">{{ last_metrics.distance_km }} km</div>
+      {% if prev_metrics and comparison %}
+        <div class="ride-metric__compare">
+          Vorige {{ last_ride_kind_label|lower }}rit:
+          {{ prev_metrics.distance_km }} km
+          {% if prev_ride and prev_ride.get('start_time_local') %}
+            <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
+          {% endif %}
+        </div>
+        <div class="ride-metric__delta {{ 'is-up' if comparison.distance_diff > 0 else 'is-down' if comparison.distance_diff < 0 else 'is-flat' }}">
+          {% if comparison.distance_diff > 0 %}+{% endif %}{{ comparison.distance_diff }} km
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="ride-metric">
+      <div class="ride-metric__label">Gem. snelheid</div>
+      <div class="ride-metric__current">{{ last_metrics.speed_kmh }} km/u</div>
+      {% if prev_metrics and comparison %}
+        <div class="ride-metric__compare">
+          Vorige {{ last_ride_kind_label|lower }}rit:
+          {{ prev_metrics.speed_kmh }} km/u
+          {% if prev_ride and prev_ride.get('start_time_local') %}
+            <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
+          {% endif %}
+        </div>
+        <div class="ride-metric__delta {{ 'is-up' if comparison.speed_diff > 0 else 'is-down' if comparison.speed_diff < 0 else 'is-flat' }}">
+          {% if comparison.speed_diff > 0 %}+{% endif %}{{ comparison.speed_diff }} km/u
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="ride-metric">
+      <div class="ride-metric__label">Suffer score</div>
+      <div class="ride-metric__current">{{ last_metrics.suffer }}</div>
+      {% if prev_metrics and comparison %}
+        <div class="ride-metric__compare">
+          Vorige {{ last_ride_kind_label|lower }}rit:
+          {{ prev_metrics.suffer }}
+          {% if prev_ride and prev_ride.get('start_time_local') %}
+            <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
+          {% endif %}
+        </div>
+        <div class="ride-metric__delta {{ 'is-up' if comparison.suffer_diff > 0 else 'is-down' if comparison.suffer_diff < 0 else 'is-flat' }}">
+          {% if comparison.suffer_diff > 0 %}+{% endif %}{{ comparison.suffer_diff }}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if ride_insight %}
+    <div class="ride-analysis__insight">
+      {{ ride_insight }}
+    </div>
+  {% endif %}
+</div>
+{% endif %}
+
+
 <div class="stack">
   <section class="card strava-status-card">
     <div class="card__header">
