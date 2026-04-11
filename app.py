@@ -34,6 +34,20 @@ def to_float(value, default=None):
     except ValueError:
         return default
 
+def match_activity_type(activity_type, keywords):
+    t = (activity_type or "").lower()
+    return any(k in t for k in keywords)
+
+def format_duration_short(seconds):
+    if seconds is None:
+        return "0u 00m"
+    seconds = int(seconds)
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    return f"{hours}u {minutes:02d}m"
+
+def format_km(value):
+    return round(float(value or 0), 1)
 
 def clamp(value, low=0, high=100):
     try:
@@ -1807,18 +1821,263 @@ def build_ride_insight(last_metrics, prev_metrics, comparison, ride_kind):
     distance_diff = comparison["distance_diff"]
 
     if speed_diff > 0 and suffer_diff <= 0:
-        return f"Sterker dan je vorige {kind_label}rit: hogere snelheid bij gelijke of lagere belasting."
+        return f"Sterker dan je vorige {kind_label}  rit: hogere snelheid bij gelijke of lagere belasting."
     if speed_diff > 0 and suffer_diff > 0:
-        return f"Sneller dan je vorige {kind_label}rit, maar het kostte ook duidelijk meer belasting."
+        return f"Sneller dan je vorige {kind_label} rit, maar het kostte ook duidelijk meer belasting."
     if speed_diff < 0 and suffer_diff > 0:
-        return f"Zwaarder dan je vorige {kind_label}rit, met lagere snelheid en hogere belasting."
+        return f"Zwaarder dan je vorige {kind_label} rit, met lagere snelheid en hogere belasting."
     if abs(speed_diff) <= 0.2 and abs(suffer_diff) <= 5:
-        return f"Vrijwel vergelijkbaar met je vorige {kind_label}rit."
+        return f"Vrijwel vergelijkbaar met je vorige {kind_label} rit."
     if distance_diff > 5:
-        return f"Langere {kind_label}rit dan de vorige, dus vergelijk de snelheid met wat nuance."
+        return f"Langere {kind_label} rit dan de vorige, dus vergelijk de snelheid met wat nuance."
     if speed_diff < 0:
-        return f"Iets langzamer dan je vorige {kind_label}rit."
-    return f"Interessante vergelijking met je vorige {kind_label}rit."
+        return f"Iets langzamer dan je vorige {kind_label} rit."
+    return f"Interessante vergelijking met je vorige {kind_label} rit."
+
+def get_week_activity_summary(conn):
+    today = datetime.now().date()
+    start_day = today - timedelta(days=today.weekday())
+    end_day = start_day + timedelta(days=6)
+
+    rows = conn.execute("""
+        SELECT
+            type,
+            COALESCE(distance_m, 0) AS distance_m,
+            COALESCE(moving_time_s, 0) AS duration_s
+        FROM strava_activities
+        WHERE date(start_time_local) BETWEEN ? AND ? 
+    """, (start_day.isoformat(), end_day.isoformat())).fetchall()
+
+    summary = {
+        "period_label": f"Week {start_day.strftime('%d %b')} t/m {end_day.strftime('%d %b')}",
+        "walk_count": 0,
+        "walk_distance_km": 0.0,
+        "walk_duration_s": 0,
+        "ride_count": 0,
+        "ride_distance_km": 0.0,
+        "ride_duration_s": 0,
+        "strength_count": 0,
+        "strength_duration_s": 0,
+    }
+
+    for row in rows:
+        activity_type = row["type"]
+        distance_m = float(row["distance_m"] or 0)
+        duration_s = int(row["duration_s"] or 0)
+
+        # 🚶 wandelen
+        if match_activity_type(activity_type, ["walk", "hike"]):
+            summary["walk_count"] += 1
+            summary["walk_distance_km"] += distance_m / 1000
+            summary["walk_duration_s"] += duration_s
+
+        # 🚴 fietsen
+        elif match_activity_type(activity_type, ["ride", "cycl", "bike"]):
+            summary["ride_count"] += 1
+            summary["ride_distance_km"] += distance_m / 1000
+            summary["ride_duration_s"] += duration_s
+
+        # 🏋️ kracht
+        elif match_activity_type(activity_type, ["weight", "strength", "workout"]):
+            summary["strength_count"] += 1
+            summary["strength_duration_s"] += duration_s
+
+    return summary
+
+def trend_meta(delta, current, previous):
+    if previous == 0:
+        pct = 100.0 if current > 0 else 0.0
+    else:
+        pct = ((current - previous) / previous) * 100.0
+
+    if delta > 0:
+        return {"arrow": "↑", "class": "trend-up", "pct": pct}
+    elif delta < 0:
+        return {"arrow": "↓", "class": "trend-down", "pct": pct}
+    else:
+        return {"arrow": "→", "class": "trend-flat", "pct": 0}
+
+
+def get_activity_summary_period(conn, start_day, end_day):
+    rows = conn.execute("""
+        SELECT
+            type,
+            COALESCE(distance_m, 0) AS distance_m,
+            COALESCE(moving_time_s, 0) AS duration_s
+        FROM strava_activities
+        WHERE date(start_time_local) BETWEEN ? AND ?
+    """, (start_day.isoformat(), end_day.isoformat())).fetchall()
+
+    summary = {
+        "walk_count": 0,
+        "walk_distance_km": 0.0,
+        "walk_duration_s": 0,
+        "ride_count": 0,
+        "ride_distance_km": 0.0,
+        "ride_duration_s": 0,
+        "strength_count": 0,
+        "strength_duration_s": 0,
+    }
+
+    for row in rows:
+        t = row["type"]
+        d = float(row["distance_m"] or 0)
+        s = int(row["duration_s"] or 0)
+
+        if match_activity_type(t, ["walk", "hike"]):
+            summary["walk_count"] += 1
+            summary["walk_distance_km"] += d / 1000
+            summary["walk_duration_s"] += s
+
+        elif match_activity_type(t, ["ride", "cycl", "bike"]):
+            summary["ride_count"] += 1
+            summary["ride_distance_km"] += d / 1000
+            summary["ride_duration_s"] += s
+
+        elif match_activity_type(t, ["strength", "weight", "workout"]):
+            summary["strength_count"] += 1
+            summary["strength_duration_s"] += s
+
+    return summary
+
+def trend_arrow(delta):
+    if delta > 0:
+        return "↑"
+    elif delta < 0:
+        return "↓"
+    return "→"
+
+
+def build_comparison(this_week, prev_week, start_day, end_day):
+    def cmp(key):
+        current = this_week.get(key, 0)
+        previous = prev_week.get(key, 0)
+        delta = current - previous
+        trend = trend_meta(delta, current, previous)    
+
+        return {
+            "current": current,
+            "previous": previous,
+            "delta": delta,
+            "trend": trend["arrow"],
+            "trend_class": trend["class"],
+            "trend_pct": trend["pct"],
+        }
+
+    return {
+        "period_label": f"{start_day} t/m {end_day}",
+
+        "walk": {
+            "count": cmp("walk_count"),
+            "distance": cmp("walk_distance_km"),
+            "duration": cmp("walk_duration_s"),
+        },
+
+        "ride": {
+            "count": cmp("ride_count"),
+            "distance": cmp("ride_distance_km"),
+            "duration": cmp("ride_duration_s"),
+        },
+
+        "strength": {
+            "count": cmp("strength_count"),
+            "duration": cmp("strength_duration_s"),
+        },
+    }
+
+def build_week_coach_message(comp, readiness_score=None, form=None):
+    ride_delta = comp["ride"]["distance"]["delta"]
+    strength_delta = comp["strength"]["count"]["delta"]
+
+    messages = []
+
+    if ride_delta > 30:
+        messages.append("meer fietsvolume dan vorige week")
+    elif ride_delta < -30:
+        messages.append("minder fietsvolume dan vorige week")
+
+    if strength_delta > 0:
+        messages.append("meer krachttraining")
+    elif strength_delta < 0:
+        messages.append("minder krachttraining")
+
+    low_readiness = readiness_score is not None and readiness_score < 45
+    good_readiness = readiness_score is not None and readiness_score >= 65
+    heavy_fatigue = form is not None and form < -10
+
+    if low_readiness or heavy_fatigue:
+        messages.append("herstel verdient nu prioriteit")
+    elif good_readiness:
+        messages.append("herstel oogt goed")
+
+    if not messages:
+        return "Vrij stabiele trainingsweek."
+
+    sentence = " · ".join(messages)
+    return sentence[:1].upper() + sentence[1:] + "."
+
+
+def get_week_comparison(conn, readiness_score=None, form=None):
+    today = datetime.now().date()
+
+    start_this = today - timedelta(days=today.weekday())
+    end_this = start_this + timedelta(days=6)
+
+    start_prev = start_this - timedelta(days=7)
+    end_prev = start_this - timedelta(days=1)
+
+    this_week = get_activity_summary_period(conn, start_this, end_this)
+    prev_week = get_activity_summary_period(conn, start_prev, end_prev)
+
+    comp = build_comparison(this_week, prev_week, start_this, end_this)
+    comp["coach"] = build_week_coach_message(
+        comp,
+        readiness_score=readiness_score,
+        form=form,
+    )
+    return comp
+
+
+def build_week_readiness_message(week_comp, readiness_score=None, form=None):
+    """
+    Combineert weektrend met readiness/form.
+    readiness_score: 0-100
+    form: TSB / form score (mag None zijn)
+    """
+    ride_km_delta = week_comp["ride"]["distance"]["delta"]
+    strength_delta = week_comp["strength"]["count"]["delta"]
+
+    heavy_week = ride_km_delta > 25
+    light_week = ride_km_delta < -25
+    less_strength = strength_delta < 0
+    more_strength = strength_delta > 0
+
+    low_readiness = readiness_score is not None and readiness_score < 45
+    okay_readiness = readiness_score is not None and 45 <= readiness_score < 65
+    good_readiness = readiness_score is not None and readiness_score >= 65
+
+    heavy_fatigue = form is not None and form < -10
+    fresh_form = form is not None and form > 5
+
+    if heavy_week and (low_readiness or heavy_fatigue):
+        return "Zware trainingsweek + lage herstelstatus → houd het vandaag rustig of kies herstel."
+    if heavy_week and good_readiness:
+        return "Meer trainingsvolume dan vorige week en je herstel oogt nog goed → prima opbouw."
+    if light_week and low_readiness:
+        return "Minder trainingsvolume en lage herstelstatus → waarschijnlijk terecht een rustigere fase."
+    if light_week and good_readiness:
+        return "Je deed minder dan vorige week terwijl je herstel goed is → ruimte voor een stevige prikkel."
+    if less_strength and okay_readiness:
+        return "Minder krachttraining deze week → let op behoud van kracht en spierprikkel."
+    if less_strength and low_readiness:
+        return "Minder krachttraining past bij je lagere herstelstatus → focus op opladen."
+    if more_strength and good_readiness:
+        return "Meer krachttraining en goede herstelstatus → sterke combinatie voor progressie."
+    if fresh_form and good_readiness:
+        return "Je herstel en vorm zien er gunstig uit → goed moment voor kwaliteitstraining."
+    if heavy_fatigue:
+        return "Je weekbelasting loopt op en je vorm is wat vermoeid → bewaak herstel."
+    return "Vrij stabiele trainingsweek met een neutrale herstelindruk."
 
 @app.route("/")
 def home():
@@ -2002,6 +2261,15 @@ def home():
             last_strava_sync_raw = last_strava_sync_obj
 
         last_strava_sync = time_ago_from_iso(last_strava_sync_raw)
+        
+        week_activity = get_week_activity_summary(conn)        
+      
+        week_comp = get_week_comparison(
+            conn, 
+            readiness_score=readiness.get("score"), 
+            form=form,
+        )
+    
 
     return render_template(
         "home.html",
@@ -2035,6 +2303,10 @@ def home():
         prev_metrics=prev_metrics,
         comparison=comparison,
         ride_insight=ride_insight,
+        week_activity=week_activity,
+        format_duration_short=format_duration_short,
+        format_km=format_km,
+        week_comp=week_comp,
     )
 
     

@@ -199,7 +199,7 @@ data-weekly-kcal-target="17500"
       <div class="ride-metric__current">{{ last_metrics.distance_km }} km</div>
       {% if prev_metrics and comparison %}
         <div class="ride-metric__compare">
-          Vorige {{ last_ride_kind_label|lower }}rit:
+          Vergeleken met {{ prev_ride.name if prev_ride else "-" }}
           {{ prev_metrics.distance_km }} km
           {% if prev_ride and prev_ride.get('start_time_local') %}
             <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
@@ -216,7 +216,7 @@ data-weekly-kcal-target="17500"
       <div class="ride-metric__current">{{ last_metrics.speed_kmh }} km/u</div>
       {% if prev_metrics and comparison %}
         <div class="ride-metric__compare">
-          Vorige {{ last_ride_kind_label|lower }}rit:
+          Vergeleken met {{ prev_ride.name if prev_ride else "-" }}
           {{ prev_metrics.speed_kmh }} km/u
           {% if prev_ride and prev_ride.get('start_time_local') %}
             <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
@@ -233,7 +233,7 @@ data-weekly-kcal-target="17500"
       <div class="ride-metric__current">{{ last_metrics.suffer }}</div>
       {% if prev_metrics and comparison %}
         <div class="ride-metric__compare">
-          Vorige {{ last_ride_kind_label|lower }}rit:
+          Vergeleken met {{ prev_ride.name if prev_ride else "-" }}
           {{ prev_metrics.suffer }}
           {% if prev_ride and prev_ride.get('start_time_local') %}
             <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
@@ -254,6 +254,78 @@ data-weekly-kcal-target="17500"
 </div>
 {% endif %}
 
+<div class="card">
+  <div class="card__header">
+    <h3>Weekoverzicht</h3>
+    <span class="muted">{{ week_comp.period_label }}</span>
+  </div>
+
+  <div class="card__body">
+    <div class="week-summary-grid">
+
+      <!-- 🚴 Fietsen -->
+      <div class="metric-tile">
+        <span class="metric-tile__label">Fietsen</span>
+
+        <strong class="metric-tile__value {{ week_comp.ride.count.trend_class }}">
+          {{ week_comp.ride.count.current }}x {{ week_comp.ride.count.trend }}
+        </strong>
+
+      <div class="metric-tile__sub">
+        {{ format_km(week_comp.ride.distance.current) }} km
+        <span class="{{ week_comp.ride.distance.trend_class }}">
+          ({{ week_comp.ride.distance.delta | round(1) }},
+           {{ week_comp.ride.distance.pct | default(0) | round(0) }}%)
+        </span>
+      </div>
+    </div>
+
+      <!-- 🚶 Wandelen -->
+      <div class="metric-tile">
+        <span class="metric-tile__label">Wandelen</span>
+
+        <strong class="metric-tile__value {{ week_comp.walk.count.trend_class }}">
+          {{ week_comp.walk.count.current }}x {{ week_comp.walk.count.trend }}
+        </strong>
+
+        <div class="metric-tile__sub">
+          {{ format_km(week_comp.walk.distance.current) }} km
+          <span class="{{ week_comp.walk.distance.trend_class }}">
+            ({{ week_comp.walk.distance.delta | round(1) }},
+             {{ week_comp.walk.distance.pct | default(0) | round(0) }}%)
+          </span>
+        </div>
+      </div>
+      
+      <!-- 🏋️ Kracht -->
+      <div class="metric-tile">
+        <span class="metric-tile__label">Krachttraining</span>
+
+        <strong class="metric-tile__value {{ week_comp.strength.count.trend_class }}">
+          {{ week_comp.strength.count.current }}x {{ week_comp.strength.count.trend }}
+        </strong>
+
+        <div class="metric-tile__sub">
+          {{ format_duration_short(week_comp.strength.duration.current) }}
+          <span class="{{ week_comp.strength.duration.trend_class }}">
+            ({{ week_comp.strength.duration.delta > 0 and "+" or "" }}
+            {{ (week_comp.strength.duration.delta / 3600) | round(1) }}u)
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card__body">
+    <div class="coach-stack">
+      <div class="coach-message">
+        {{ week_comp.coach }}
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="stack">
   <section class="card strava-status-card">

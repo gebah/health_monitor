@@ -2377,3 +2377,77 @@ html[data-theme="dark"] .dial {
   font-size: 12px;
   margin-left: 4px;
 }
+
+.week-summary-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+  gap:14px;
+}
+
+.metric-tile{
+  background:var(--panel-2);
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:16px;
+}
+
+.metric-tile__label{
+  display:block;
+  font-size:.92rem;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+
+.metric-tile__value{
+  display:block;
+  font-size:1.5rem;
+  line-height:1.1;
+  margin-bottom:6px;
+}
+
+.metric-tile__sub{
+  font-size:.95rem;
+  color:var(--muted);
+}
+
+.trend-up{
+  color: var(--good);
+  font-weight: 600;
+}
+
+.trend-down{
+  color: var(--bad);
+  font-weight: 600;
+}
+
+.trend-flat{
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.coach-message{
+  background: rgba(59,130,246,0.08);
+  border: 1px solid rgba(59,130,246,0.25);
+  border-radius: 14px;
+  padding: 14px 16px;
+  font-size: .95rem;
+}
+
+.coach-stack{
+  display:grid;
+  gap:12px;
+}
+
+.coach-message{
+  background:var(--panel-2);
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:14px 16px;
+  font-size:.95rem;
+  color:var(--text);
+}
+
+.coach-message--primary{
+  background:rgba(59,130,246,0.08);
+  border:1px solid rgba(59,130,246,0.22);
+}
