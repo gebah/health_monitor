@@ -12,7 +12,7 @@ import pandas as pd
 
 # Pas aan als je DB elders staat
 DB_PATH = os.path.expanduser(
-    "/home/gba/Documenten/PycharmProjects/health_monitor/health.sqlite"
+    "/opt/health_monitor/health.sqlite"
 )
 
 

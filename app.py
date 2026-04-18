@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, redirect, current_app, url_for, flash
 from datetime import date, datetime, timedelta, UTC
-from collector import sync_garmin, sync_strava, sync_all, ensure_manual_recovery_table
-from models import avg_ignore_none, get_daily_metrics_history, calc_body_deltas
+from collector import sync_garmin, ensure_manual_recovery_table
+from models import get_daily_metrics_history, calc_body_deltas
 from recovery import get_latest_manual_recovery, get_manual_recovery_series, get_best_recovery_for_day, get_latest_recovery_input, get_recovery_baselines
 
 import sqlite3
@@ -59,10 +59,11 @@ def clamp(value, low=0, high=100):
 
 
 def avg_ignore_none(values):
-    vals = [to_float(v) for v in values if to_float(v) is not None]
+    vals = [v for v in values if v not in (None, "")]
     if not vals:
         return None
-    return sum(vals) / len(vals)
+    return round(sum(vals) / len(vals), 2)
+
 
 def get_conn():
     conn = sqlite3.connect(DB)
@@ -585,55 +586,22 @@ def _ema(loads, tau_days: int):
 
     return out
 
-def activity_load(relative_effort=None, weighted_power=None, moving_time_s=None, ftp=None, suffer_score=None):
-    # 1) Prefer Relative Effort if available
-    if relative_effort is not None:
-        try:
-            return float(relative_effort)
-        except (TypeError, ValueError):
-            pass
-
-    # 2) Fallback: TSS-like from weighted power + FTP
-    try:
-        if weighted_power is not None and moving_time_s is not None and ftp and float(ftp) > 0:
-            wp = float(weighted_power)
-            dur_h = float(moving_time_s) / 3600.0
-            if_val = wp / float(ftp)
-            return dur_h * (if_val ** 2) * 100.0
-    except (TypeError, ValueError, ZeroDivisionError):
-        pass
-
-    # 3) Fallback: suffer score
-    if suffer_score is not None:
-        try:
-            return float(suffer_score)
-        except (TypeError, ValueError):
-            pass
-
-    return 0.0
-
 def get_training_load_today(conn, days_back: int = 365):
     """
-    Geeft ATL/CTL/Form op basis van dagelijkse trainingsload.
-    Prioriteit activiteit-load:
-    1. relative_effort
-    2. TSS-like uit weighted power + FTP
-    3. suffer_score
+    Geeft ATL/CTL/Form op basis van dagelijkse trainingsload uit strava_activities.tcl.
 
-    Geeft ook 'start-of-day' form terug, zodat dashboard beter matcht met
-    hoe Strava/TrainingPeaks freshness vaak voelt vóór de training van vandaag.
+    Gebruikt start-of-day én end-of-day waarden:
+    - end-of-day: na de load van vandaag
+    - start-of-day: vóór de load van vandaag
     """
-
-    ftp = STRAVA_FTP if 'STRAVA_FTP' in globals() else 0
 
     rows = conn.execute("""
         SELECT
             date(start_time_local) AS day,
-            raw_json,
-            moving_time_s,
-            suffer_score
+            SUM(COALESCE(tcl, 0)) AS load
         FROM strava_activities
         WHERE start_time_local IS NOT NULL
+        GROUP BY date(start_time_local)
         ORDER BY day ASC
     """).fetchall()
 
@@ -647,34 +615,12 @@ def get_training_load_today(conn, days_back: int = 365):
             "atl_start": None,
             "ctl_start": None,
             "tsb_start": None,
+            "atl_start_prev": None,
+            "ctl_start_prev": None,
+            "tsb_start_prev": None,
         }
 
-    daily = {}
-
-    for row in rows:
-        day = row["day"]
-        raw = {}
-        try:
-            raw = json.loads(row["raw_json"]) if row["raw_json"] else {}
-        except Exception:
-            raw = {}
-
-        # Try common Strava keys
-        relative_effort = raw.get("relative_effort")
-        weighted_power = (
-            raw.get("weighted_average_watts")
-            or raw.get("weighted_power")
-        )
-
-        load = activity_load(
-            relative_effort=relative_effort,
-            weighted_power=weighted_power,
-            moving_time_s=row["moving_time_s"],
-            ftp=ftp,
-            suffer_score=row["suffer_score"],
-        )
-
-        daily[day] = daily.get(day, 0.0) + load
+    daily = {row["day"]: float(row["load"] or 0.0) for row in rows}
 
     days_sorted = sorted(daily.keys())
     min_day = _parse_yyyy_mm_dd(days_sorted[0])
@@ -683,8 +629,12 @@ def get_training_load_today(conn, days_back: int = 365):
     end_day = max_day
     start_day = end_day - timedelta(days=days_back - 1)
 
+    if start_day < min_day:
+        start_day = min_day
+
     xs = []
     loads = []
+
     d = start_day
     while d <= end_day:
         ds = d.isoformat()
@@ -706,17 +656,18 @@ def get_training_load_today(conn, days_back: int = 365):
             "atl_start": None,
             "ctl_start": None,
             "tsb_start": None,
+            "atl_start_prev": None,
+            "ctl_start_prev": None,
+            "tsb_start_prev": None,
         }
 
     tcl_today = loads[-1] if loads else None
     tcl_yesterday = loads[-2] if len(loads) >= 2 else None
 
-    # End-of-day values (na de load van vandaag)
     atl_end = atl_series[-1]
     ctl_end = ctl_series[-1]
     tsb_end = tsb_series[-1]
 
-    # Start-of-day values (vóór de load van vandaag)
     if len(atl_series) >= 2 and len(ctl_series) >= 2:
         atl_start = atl_series[-2]
         ctl_start = ctl_series[-2]
@@ -726,7 +677,6 @@ def get_training_load_today(conn, days_back: int = 365):
         ctl_start = ctl_end
         tsb_start = tsb_end
 
-    # Start-of-day values van gisteren
     if len(atl_series) >= 3 and len(ctl_series) >= 3:
         atl_start_prev = atl_series[-3]
         ctl_start_prev = ctl_series[-3]
@@ -740,6 +690,7 @@ def get_training_load_today(conn, days_back: int = 365):
         "atl": round(float(atl_end), 1),
         "ctl": round(float(ctl_end), 1),
         "tsb": round(float(tsb_end), 1),
+
         "tcl_today": round(float(tcl_today), 1) if tcl_today is not None else None,
         "tcl_yesterday": round(float(tcl_yesterday), 1) if tcl_yesterday is not None else None,
 
@@ -753,47 +704,20 @@ def get_training_load_today(conn, days_back: int = 365):
     }
 
 def get_training_load_series(conn, days_back: int = 365):
-    ftp = STRAVA_FTP if 'STRAVA_FTP' in globals() else 0
-
     rows = conn.execute("""
         SELECT
             date(start_time_local) AS day,
-            raw_json,
-            moving_time_s,
-            suffer_score
+            SUM(COALESCE(tcl, 0)) AS load
         FROM strava_activities
         WHERE start_time_local IS NOT NULL
+        GROUP BY date(start_time_local)
         ORDER BY day ASC
     """).fetchall()
 
     if not rows:
         return []
 
-    daily = {}
-
-    for row in rows:
-        day = row["day"]
-        raw = {}
-        try:
-            raw = json.loads(row["raw_json"]) if row["raw_json"] else {}
-        except Exception:
-            raw = {}
-
-        relative_effort = raw.get("relative_effort")
-        weighted_power = (
-            raw.get("weighted_average_watts")
-            or raw.get("weighted_power")
-        )
-
-        load = activity_load(
-            relative_effort=relative_effort,
-            weighted_power=weighted_power,
-            moving_time_s=row["moving_time_s"],
-            ftp=ftp,
-            suffer_score=row["suffer_score"],
-        )
-
-        daily[day] = daily.get(day, 0.0) + load
+    daily = {row["day"]: float(row["load"] or 0.0) for row in rows}
 
     days_sorted = sorted(daily.keys())
     min_day = _parse_yyyy_mm_dd(days_sorted[0])
@@ -802,8 +726,12 @@ def get_training_load_series(conn, days_back: int = 365):
     end_day = max_day
     start_day = end_day - timedelta(days=days_back - 1)
 
+    if start_day < min_day:
+        start_day = min_day
+
     xs = []
     loads = []
+
     d = start_day
     while d <= end_day:
         ds = d.isoformat()

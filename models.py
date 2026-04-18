@@ -27,13 +27,6 @@ def _to_float(value):
     except ValueError:
         return None
 
-def avg_ignore_none(values):
-    vals = [v for v in values if v not in (None, "")]
-    if not vals:
-        return None
-    return round(sum(vals) / len(vals), 2)
-
-
 def get_daily_metrics_history(days: int = 28):
     conn = get_conn()
     rows = conn.execute("""
