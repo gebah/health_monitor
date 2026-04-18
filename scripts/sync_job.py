@@ -1,18 +1,35 @@
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import sqlite3
 import time
 import requests
 import json
 from datetime import datetime
 
-DB = "/home/gba/Documenten/PycharmProjects/health_monitor/health.sqlite"
-STRAVA_FTP = 250  # Set your FTP here or via env vars
+from collector import sync_garmin, DB_PATH
+
+STRAVA_FTP = int(os.getenv("STRAVA_FTP", "250"))
+STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
+STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
+
+
+def get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
 
 def get_strava_access_token(conn: sqlite3.Connection) -> str | None:
-    row = conn.execute("""
+    row = conn.execute(
+        """
         SELECT athlete_id, access_token, refresh_token, expires_at
         FROM strava_tokens
         LIMIT 1
-    """).fetchone()
+        """
+    ).fetchone()
 
     if not row:
         print("[info] No Strava tokens found. First link via Flask: /strava/connect")
@@ -30,37 +47,38 @@ def get_strava_access_token(conn: sqlite3.Connection) -> str | None:
 
     print("[info] Refreshing Strava token...")
 
-    r = requests.post("https://www.strava.com/oauth/token", data={
-        "client_id": STRAVA_CLIENT_ID,
-        "client_secret": STRAVA_CLIENT_SECRET,
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-    }, timeout=30)
+    r = requests.post(
+        "https://www.strava.com/oauth/token",
+        data={
+            "client_id": STRAVA_CLIENT_ID,
+            "client_secret": STRAVA_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        },
+        timeout=30,
+    )
     r.raise_for_status()
     tok = r.json()
 
-    conn.execute("""
+    conn.execute(
+        """
         UPDATE strava_tokens
         SET access_token = ?,
             refresh_token = ?,
             expires_at = ?,
             synced_at = datetime('now')
         WHERE athlete_id = ?
-    """, (
-        tok["access_token"],
-        tok["refresh_token"],
-        int(tok["expires_at"]),
-        athlete_id
-    ))
+        """,
+        (
+            tok["access_token"],
+            tok["refresh_token"],
+            int(tok["expires_at"]),
+            athlete_id,
+        ),
+    )
     conn.commit()
 
     return tok["access_token"]
-
-
-def get_conn():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 def sync_strava_activities(conn: sqlite3.Connection, days: int | None = 30) -> int:
@@ -119,7 +137,8 @@ def sync_strava_activities(conn: sqlite3.Connection, days: int | None = 30) -> i
                 km = (float(dist_m) / 1000.0) if dist_m else 0.0
                 tcl = mins + km * 0.5
 
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO strava_activities (
                     strava_activity_id,
                     start_time_local,
@@ -135,21 +154,23 @@ def sync_strava_activities(conn: sqlite3.Connection, days: int | None = 30) -> i
                     raw_json,
                     synced_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                a["id"],
-                a.get("start_date_local"),
-                a.get("name"),
-                base_type,
-                sport_type,
-                ride_kind,
-                a.get("distance"),
-                a.get("moving_time"),
-                a.get("elapsed_time"),
-                a.get("suffer_score"),
-                tcl,
-                json.dumps(a, ensure_ascii=False),
-                now,
-            ))
+                """,
+                (
+                    a["id"],
+                    a.get("start_date_local"),
+                    a.get("name"),
+                    base_type,
+                    sport_type,
+                    ride_kind,
+                    a.get("distance"),
+                    a.get("moving_time"),
+                    a.get("elapsed_time"),
+                    a.get("suffer_score"),
+                    tcl,
+                    json.dumps(a, ensure_ascii=False),
+                    now,
+                ),
+            )
             saved += 1
 
         if len(acts) < per_page:
@@ -159,5 +180,29 @@ def sync_strava_activities(conn: sqlite3.Connection, days: int | None = 30) -> i
     conn.commit()
     return saved
 
-conn = get_conn()
-sync_strava_activities(conn, None)
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print("Usage: python scripts/sync_job.py [garmin|strava] [days]")
+        return 1
+
+    job = sys.argv[1].lower()
+    days = int(sys.argv[2]) if len(sys.argv) > 2 else 30
+
+    if job == "garmin":
+        n_acts, n_days = sync_garmin(days)
+        print(f"[ok] Garmin sync complete: activities={n_acts}, daily_metrics={n_days}")
+        return 0
+
+    if job == "strava":
+        with get_conn() as conn:
+            saved = sync_strava_activities(conn, days)
+        print(f"[ok] Strava sync complete: saved={saved}")
+        return 0
+
+    print(f"Unknown job: {job}")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

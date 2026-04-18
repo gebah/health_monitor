@@ -12,7 +12,8 @@ import io
 app = Flask(__name__)
 app.secret_key = "secret"
 
-DB = "/home/gba/Documenten/PycharmProjects/health_monitor/health.sqlite"
+#DB = "/home/gba/Documenten/PycharmProjects/health_monitor/health.sqlite"
+DB = "/opt/health_monitor/health.sqlite"
 
 USER_NAME = "Gé"
 USER_HEIGHT = 1.92

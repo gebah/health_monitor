@@ -5,13 +5,12 @@ import json
 import os
 import sqlite3
 import time
+import requests
+
 from datetime import datetime, timedelta, date, UTC
 from typing import Any
-
-import requests
 from garminconnect import Garmin
 from dotenv import load_dotenv
-
 from readiness import compute_strava_readiness_series
 
 load_dotenv("/etc/health_monitor.env")
@@ -24,7 +23,7 @@ DB_PATH = os.environ.get(
     "HEALTH_DB",
     os.environ.get(
         "GARMIN_DB_PATH",
-        os.path.expanduser("/home/gba/Documenten/PycharmProjects/health_monitor/health.sqlite"),
+        os.path.expanduser("/opt/health_monitor/health.sqlite"),
     ),
 )
 
@@ -64,12 +63,11 @@ def pick_first(d: dict, paths: list[str]):
 # ----------------------------
 # Garmin Client
 # ----------------------------
-def get_client() -> Garmin:
-    email = os.environ["GARMIN_EMAIL"]
-    password = os.environ["GARMIN_PASSWORD"]
 
-    api = Garmin(email, password)
-    api.login()
+def get_client() -> Garmin:
+    token_dir = os.getenv("GARMIN_TOKEN_DIR", "/home/gba/.garminconnect")
+    api = Garmin()
+    api.login(token_dir)
     return api
 
 
@@ -271,7 +269,6 @@ def upsert_daily_metrics(
     ))
     conn.commit()
 
-
 def fetch_and_store_daily_metrics(api: Garmin, conn: sqlite3.Connection, days: int) -> int:
     now = datetime.now()
     synced_at = now.isoformat(timespec="seconds")
@@ -362,8 +359,103 @@ def fetch_and_store_daily_metrics(api: Garmin, conn: sqlite3.Connection, days: i
         )):
             upsert_daily_metrics(conn, d, payload, synced_at)
             saved += 1
+        else:
+            print("nothing usable for", d, flush=True)
 
     return saved
+
+# def fetch_and_store_daily_metrics(api: Garmin, conn: sqlite3.Connection, days: int) -> int:
+#     now = datetime.now()
+#     synced_at = now.isoformat(timespec="seconds")
+#     saved = 0
+
+#     for i in range(days):
+#         d = (now.date() - timedelta(days=i)).isoformat()
+
+#         sleep = safe_call(api.get_sleep_data, d)
+#         stress = safe_call(api.get_stress_data, d)
+#         hrv = safe_call(api.get_hrv_data, d)
+#         bb = safe_call(api.get_body_battery, d)
+#         rhr = safe_call(api.get_rhr_day, d)
+
+#         payload: dict[str, Any] = {
+#             "sleep_seconds": None,
+#             "sleep_score": None,
+#             "resting_hr": None,
+#             "avg_stress": None,
+#             "hrv_rmssd": None,
+#             "bb_high": None,
+#             "bb_low": None,
+#             "raw_json": None,
+#         }
+
+#         raw = {"sleep": sleep, "stress": stress, "hrv": hrv, "bb": bb, "rhr": rhr}
+
+#         if isinstance(sleep, dict):
+#             payload["sleep_seconds"] = pick_first(sleep, [
+#                 "dailySleepDTO.sleepTimeSeconds",
+#                 "dailySleepDTO.totalSleepSeconds",
+#             ])
+#             payload["sleep_score"] = pick_first(sleep, [
+#                 "dailySleepDTO.sleepScore",
+#                 "dailySleepDTO.overallSleepScore",
+#                 "dailySleepDTO.sleepScores.overall.value",
+#             ])
+#             payload["resting_hr"] = pick_first(sleep, [
+#                 "restingHeartRate",
+#                 "dailySleepDTO.restingHeartRate",
+#             ])
+#             payload["hrv_rmssd"] = pick_first(sleep, [
+#                 "avgOvernightHrv",
+#                 "dailySleepDTO.avgOvernightHrv",
+#             ])
+
+#         if isinstance(stress, dict):
+#             payload["avg_stress"] = pick_first(stress, [
+#                 "avgStressLevel",
+#                 "averageStressLevel",
+#             ])
+
+#         if payload["hrv_rmssd"] is None and isinstance(hrv, dict):
+#             payload["hrv_rmssd"] = pick_first(hrv, [
+#                 "hrvSummary.rmssd",
+#                 "hrvSummary.avgRmssd",
+#                 "hrvSummary.overallRmssd",
+#             ])
+
+#         if isinstance(bb, list) and bb and isinstance(bb[0], dict):
+#             arr = bb[0].get("bodyBatteryValuesArray")
+#             if isinstance(arr, list) and arr:
+#                 vals = []
+#                 for item in arr:
+#                     if isinstance(item, (int, float)):
+#                         vals.append(float(item))
+#                     elif isinstance(item, (list, tuple)) and len(item) >= 2 and isinstance(item[1], (int, float)):
+#                         vals.append(float(item[1]))
+#                     elif isinstance(item, dict):
+#                         for k in ("value", "bodyBattery", "bb"):
+#                             if k in item and isinstance(item[k], (int, float)):
+#                                 vals.append(float(item[k]))
+#                                 break
+#                 if vals:
+#                     payload["bb_high"] = max(vals)
+#                     payload["bb_low"] = min(vals)
+
+#         if payload["resting_hr"] is None and isinstance(rhr, dict):
+#             payload["resting_hr"] = pick_first(rhr, [
+#                 "allMetrics.restingHeartRate.value",
+#                 "allMetrics.RESTING_HEART_RATE.value",
+#             ])
+
+#         payload["raw_json"] = json.dumps(raw, ensure_ascii=False)
+
+#         if any(payload[k] is not None for k in (
+#             "sleep_seconds", "sleep_score", "resting_hr", "avg_stress", "hrv_rmssd", "bb_high", "bb_low"
+#         )):
+#             upsert_daily_metrics(conn, d, payload, synced_at)
+#             saved += 1
+
+#     return saved
 
 
 # ----------------------------
@@ -419,7 +511,6 @@ def get_strava_access_token(conn: sqlite3.Connection) -> str | None:
     return tok["access_token"]
 
 def update_last_strava_sync(conn):
-    print("DEBUG: update_last_strava_sync called")
     conn.execute("""
         INSERT INTO app_cache(key, value, updated_at)
         VALUES (?, ?, ?)
