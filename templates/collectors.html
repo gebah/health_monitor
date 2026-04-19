@@ -1,17 +1,55 @@
-{% extends "base.html" %}
-{% block title %}Collectors{% endblock %}
+  {% extends "base.html" %}
+  {% block title %}Collectors{% endblock %}
 
-{% block content %}
-<h1>Collectors</h1>
+  {% block content %}
+  <h1>Collectors</h1>
 
-<form method="post" action="/collectors/run" class="actions">
-  <button name="action" value="collector_all">Run all</button>
-  <button name="action" value="collector_garmin">Run Garmin</button>
-  <button name="action" value="collector_strava">Run Strava</button>
-</form>
+  <form method="post" action="/collectors/run" class="actions">
+    <button name="action" value="collector_all">Run all</button>
+    <button name="action" value="collector_garmin">Run Garmin</button>
+    <button name="action" value="collector_strava">Run Strava</button>
+  </form>
 
-<p class="hint">
-Tip: als je collectors soms lang duren, laat ik je zo meteen zien hoe je dit async kunt doen
-(zodat je pagina direct terugkomt) + een “laatste run” log.
-</p>
-{% endblock %}
+  <h3>Laatste runs</h3>
+
+  {% if logs %}
+    <div class="card">
+      <div class="card__body">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Collector</th>
+              <th>Status</th>
+              <th>Gestart</th>
+              <th>Afgerond</th>
+              <th>Resultaat</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for log in logs %}
+            <tr>
+              <td>{{ log.collector }}</td>
+              <td>{{ log.status }}</td>
+              <td>{{ log.started_at }}</td>
+              <td>{{ log.finished_at or "-" }}</td>
+              <td>
+                {{ log.message or "-" }}
+                {% if log.details %}
+                  <div class="muted small">
+                    {% if log.details.activities is defined %}activities: {{ log.details.activities }}{% endif %}
+                    {% if log.details.daily_metrics is defined %} · daily_metrics: {{ log.details.daily_metrics }}{% endif %}
+                    {% if log.details.days is defined %} · days: {{ log.details.days }}{% endif %}
+                  </div>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% else %}
+    <p class="muted">Nog geen collector-runs gelogd.</p>
+  {% endif %}
+
+  {% endblock %}

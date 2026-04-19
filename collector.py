@@ -769,6 +769,45 @@ def weighted_score(parts: dict[str, float | None], weights: dict[str, float]) ->
     score = sum((weights[k] / wsum) * float(v) for k, v in used)
     return int(round(score))
 
+def ensure_collector_log_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS collector_run_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            collector TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            status TEXT NOT NULL,
+            message TEXT,
+            details_json TEXT
+        )
+    """)
+    
+def collector_log_start(conn, collector: str) -> int:
+    ensure_collector_log_table(conn)
+    cur = conn.execute("""
+        INSERT INTO collector_run_log (collector, started_at, status)
+        VALUES (?, datetime('now'), 'running')
+    """, (collector,))
+    conn.commit()
+    return cur.lastrowid
+
+
+def collector_log_finish(conn, log_id: int, status: str, message: str = "", details: dict | None = None):
+    ensure_collector_log_table(conn)
+    conn.execute("""
+        UPDATE collector_run_log
+        SET finished_at = datetime('now'),
+            status = ?,
+            message = ?,
+            details_json = ?
+        WHERE id = ?
+    """, (
+        status,
+        message,
+        json.dumps(details or {}, ensure_ascii=False),
+        log_id,
+    ))
+    conn.commit()
 
 # ----------------------------
 # Main

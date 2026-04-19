@@ -1,96 +1,189 @@
-{% extends "base.html" %}
-{% block title %}Recovery{% endblock %}
+      {% extends "base.html" %}
+      {% block title %}Recovery{% endblock %}
 
-{% block content %}
-<h1>Recovery</h1>
-<p class="muted">Handmatige Garmin invoer voor HRV, stress en slaapscore.</p>
+      {% block content %}
+      <h1>Recovery</h1>
+      <p class="muted">Garmin hersteldata uit daily_metrics, met optionele notities.</p>
 
-<div class="grid-2">
-  <section class="card">
-    <div class="card__header">
-      <h3>Nieuwe invoer</h3>
-    </div>
-    <div class="card__body">
-      <form method="post" class="form-grid">
-        <label>
-          <span>Datum</span>
-          <input type="date" name="day" required>
-        </label>
+      <div class="grid-2">
+        <section class="card">
+          <div class="card__header">
+            <h3>Laatste Garmin hersteldata</h3>
+          </div>
+          <div class="card__body">
+            {% if latest_recovery %}
+              <div class="metric-list">
+                <div><span>Datum</span><strong>{{ latest_recovery.day }}</strong></div>
+                <div><span>HRV</span><strong>{{ latest_recovery.hrv_rmssd or "—" }}</strong></div>
+                <div><span>Stress</span><strong>{{ latest_recovery.avg_stress or "—" }}</strong></div>
+                <div><span>Slaapscore</span><strong>{{ latest_recovery.sleep_score or "—" }}</strong></div>
+                <div><span>Body Battery</span><strong>{{ latest_recovery.body_battery_high or "—" }}</strong></div>
+                <div><span>Resting HR</span><strong>{{ latest_recovery.resting_hr or "—" }}</strong></div>
+              </div>
+            {% else %}
+              <p class="muted">Nog geen Garmin recovery data beschikbaar.</p>
+            {% endif %}
+          </div>
+        </section>
 
-        <label>
-          <span>HRV (RMSSD)</span>
-          <input type="number" step="0.1" name="hrv_rmssd" placeholder="bijv. 78.5">
-        </label>
-
-        <label>
-          <span>Stress</span>
-          <input type="number" step="0.1" name="stress" placeholder="bijv. 14.2">
-        </label>
-
-        <label>
-          <span>Slaapscore</span>
-          <input type="number" step="0.1" name="sleep_score" placeholder="bijv. 81">
-        </label>
-
-        <label class="form-grid__full">
-          <span>Notitie</span>
-          <textarea name="notes" rows="3" placeholder="optioneel"></textarea>
-        </label>
-
-        <div class="form-grid__full">
-          <button type="submit" class="btn btn--primary">Opslaan</button>
+      <section class="card">
+        <div class="card__header">
+          <h3>Trend t.o.v. normaal</h3>
         </div>
-      </form>
-    </div>
-  </section>
+        <div class="card__body">
+          {% if latest_recovery and recovery_dashboard and recovery_dashboard.deltas %}
+            <div class="metric-list">
+              <div>
+                <span>HRV</span>
+                <strong>
+                  {{ latest_recovery.hrv_rmssd or "—" }}
+                  {% if recovery_dashboard.deltas.hrv_delta is not none %}
+                    <small class="muted">
+                      ({{ "%+.1f"|format(recovery_dashboard.deltas.hrv_delta) }})
+                    </small>
+                  {% endif %}
+                </strong>
+              </div>
 
-  <section class="card">
-    <div class="card__header">
-      <h3>Laatste invoer</h3>
-    </div>
-    <div class="card__body">
-      {% if latest_manual %}
-        <div class="metric-list">
-          <div><span>Datum</span><strong>{{ latest_manual.day }}</strong></div>
-          <div><span>HRV</span><strong>{{ latest_manual.hrv_rmssd or "—" }}</strong></div>
-          <div><span>Stress</span><strong>{{ latest_manual.stress or "—" }}</strong></div>
-          <div><span>Slaapscore</span><strong>{{ latest_manual.sleep_score or "—" }}</strong></div>
-          <div><span>Notitie</span><strong>{{ latest_manual.notes or "—" }}</strong></div>
+              <div>
+                <span>Stress</span>
+                <strong>
+                  {{ latest_recovery.avg_stress or "—" }}
+                  {% if recovery_dashboard.deltas.stress_delta is not none %}
+                    <small class="muted">
+                      ({{ "%+.1f"|format(recovery_dashboard.deltas.stress_delta) }})
+                    </small>
+                  {% endif %}
+                </strong>
+              </div>
+
+              <div>
+                <span>Slaap</span>
+                <strong>
+                  {{ latest_recovery.sleep_score or "—" }}
+                  {% if recovery_dashboard.deltas.sleep_delta is not none %}
+                    <small class="muted">
+                      ({{ "%+.1f"|format(recovery_dashboard.deltas.sleep_delta) }})
+                    </small>
+                  {% endif %}
+                </strong>
+              </div>
+
+              <div>
+                <span>Body Battery</span>
+                <strong>
+                  {{ latest_recovery.body_battery_high or "—" }}
+                  {% if recovery_dashboard.deltas.bb_delta is not none %}
+                    <small class="muted">
+                      ({{ "%+.1f"|format(recovery_dashboard.deltas.bb_delta) }})
+                    </small>
+                  {% endif %}
+                </strong>
+              </div>
+
+              <div>
+                <span>Resting HR</span>
+                <strong>
+                  {{ latest_recovery.resting_hr or "—" }}
+                  {% if recovery_dashboard.deltas.rhr_delta is not none %}
+                    <small class="muted">
+                      ({{ "%+.1f"|format(recovery_dashboard.deltas.rhr_delta) }})
+                    </small>
+                  {% endif %}
+                </strong>
+              </div>
+            </div>
+
+            <p class="muted" style="margin-top:12px;">
+              Vergelijking met gemiddelde van laatste {{ baselines.n_days or 0 }} dagen.
+            </p>
+          {% else %}
+            <p class="muted">Nog geen trend t.o.v. je normale waarden beschikbaar.</p>
+          {% endif %}
         </div>
-      {% else %}
-        <p class="muted">Nog geen recovery data ingevoerd.</p>
-      {% endif %}
-    </div>
-  </section>
-</div>
+      </section>
 
-<section class="card">
-  <div class="card__header">
-    <h3>Coach V2</h3>
+      </div>
+
+      <div class="grid-2">
+        <section class="card">
+        <div class="card__header">
+          <h3>Recovery gauge</h3>
+        </div>
+        <div class="card__body">
+          {% if recovery_gauge %}
+            <div class="metric-list">
+              <div><span>Score</span><strong>{{ recovery_gauge.score if recovery_gauge.score is not none else "—" }}</strong></div>
+              <div><span>Status</span><strong>{{ recovery_gauge.label or "—" }}</strong></div>
+            </div>
+
+            {% if recovery_gauge.reasons %}
+              <p class="muted" style="margin-top:12px;">Belangrijkste signalen:</p>
+              <ul class="compact-list">
+                {% for item in recovery_gauge.reasons[:3] %}
+                  <li>{{ item }}</li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          {% else %}
+            <p class="muted">Nog onvoldoende recovery data.</p>
+          {% endif %}
+        </div>
+      </section>
+
+        <section class="card">
+          <div class="card__header">
+            <h3>Notitie toevoegen</h3>
+          </div>
+          <div class="card__body">
+            <form method="post" class="form-grid">
+              <label>
+                <span>Datum</span>
+                <input type="date" name="day" required value="{{ latest_recovery.day if latest_recovery else '' }}">
+              </label>
+
+              <label class="form-grid__full">
+                <span>Notitie</span>
+                <textarea name="notes" rows="4" placeholder="bijv. slechte benen, verkouden gevoel, matige nacht ondanks goede score"></textarea>
+              </label>
+
+              <div class="form-grid__full">
+                <button type="submit" class="btn btn--primary">Opslaan</button>
+              </div>
+            </form>
+
+            {% if latest_manual %}
+              <p class="muted" style="margin-top:12px;">
+                Laatste notitie: {{ latest_manual.day }}{% if latest_manual.notes %} — {{ latest_manual.notes }}{% endif %}
+              </p>
+            {% endif %}
+          </div>
+        </section>
+      </div>
+    <section class="card">
+      <div class="card__header">
+        <h3>Coach</h3>
+      </div>
+      <div class="card__body">
+
+          <div class="coach-status coach-status--{{ coach.status }}">
+    <span style="margin-right:6px;">{{ coach.icon }}</span>
+    {{ coach.status.replace("_", " ").title() }}
   </div>
-  <div class="card__body">
-    <div class="coach-status coach-status--{{ coach.status }}">
-      <strong>Status:</strong> {{ coach.status.replace("_", " ").title() }}
-    </div>
 
-    <p><strong>Top insight:</strong> {{ coach.top_insight }}</p>
-    <p><strong>Advies:</strong> {{ coach.advice }}</p>
+        <p><strong>{{ coach.top_insight }}</strong></p>
 
-    {% if coach.bullets %}
-      <ul class="compact-list">
-        {% for item in coach.bullets %}
-          <li>{{ item }}</li>
-        {% endfor %}
-      </ul>
-    {% endif %}
-    <p> </p>
-    <div class="metric-list">
-      <div> </div>
-      <div><span>TCL 7d</span><strong>{{ coach.tcl_7d if coach.tcl_7d is not none else "—" }}</strong></div>
-      <div><span>ATL</span><strong>{{ coach.atl if coach.atl is not none else "—" }}</strong></div>
-      <div><span>CTL</span><strong>{{ coach.ctl if coach.ctl is not none else "—" }}</strong></div>
-      <div><span>TSB</span><strong>{{ coach.tsb if coach.tsb is not none else "—" }}</strong></div>
-    </div>
-  </div>
-</section>
-{% endblock %}
+        <p class="muted">{{ coach.advice }}</p>
+
+        {% if coach.bullets %}
+          <ul class="compact-list" style="margin-top:8px;">
+            {% for item in coach.bullets[:3] %}
+              <li>{{ item }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+
+      </div>
+    </section>
+
+      {% endblock %}

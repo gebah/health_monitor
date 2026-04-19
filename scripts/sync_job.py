@@ -7,8 +7,7 @@ import sqlite3
 import time
 import requests
 import json
-from datetime import datetime
-
+from datetime import UTC, datetime
 from collector import sync_garmin, DB_PATH
 
 STRAVA_FTP = int(os.getenv("STRAVA_FTP", "250"))
@@ -190,19 +189,143 @@ def main() -> int:
     days = int(sys.argv[2]) if len(sys.argv) > 2 else 30
 
     if job == "garmin":
-        n_acts, n_days = sync_garmin(days)
-        print(f"[ok] Garmin sync complete: activities={n_acts}, daily_metrics={n_days}")
-        return 0
+        with get_conn() as conn:
+            log_id = collector_log_start(conn, "garmin")
 
+        try:
+            n_acts, n_days = sync_garmin(days)
+
+            with get_conn() as conn:
+                collector_log_finish(
+                    conn,
+                    log_id,
+                    "success",
+                    f"Garmin sync klaar: {n_acts} activities, {n_days} daily metrics",
+                    {
+                        "activities": n_acts,
+                        "daily_metrics": n_days,
+                        "days": days,
+                    },
+                ),
+            print(f"[ok] Garmin sync complete: activities={n_acts}, daily_metrics={n_days}")
+            return 0
+
+        except Exception as e:
+            with get_conn() as conn:
+                collector_log_finish(
+                    conn,
+                    log_id,
+                    "error",
+                    str(e),
+                    {"days": days},
+                )
+            raise
+        
     if job == "strava":
         with get_conn() as conn:
-            saved = sync_strava_activities(conn, days)
-        print(f"[ok] Strava sync complete: saved={saved}")
-        return 0
+            log_id = collector_log_start(conn, "strava")
+
+        try:
+            with get_conn() as conn:
+                saved = sync_strava_activities(conn, days)
+
+            now_iso = datetime.now(UTC).isoformat()
+
+            with get_conn() as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS app_cache (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO app_cache(key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = excluded.updated_at
+                """, (
+                    "last_strava_sync",
+                    json.dumps({"ts": now_iso}),
+                    now_iso,
+                ))
+
+                collector_log_finish(
+                    conn,
+                    log_id,
+                    "success",
+                    f"Strava sync klaar: {saved} activities",
+                    {
+                        "activities": saved,
+                        "days": days,
+                    },
+                ),
+                conn.commit()
+
+            print(f"[ok] Strava sync complete: saved={saved}")
+            return 0
+
+        except Exception as e:
+            with get_conn() as conn:
+                collector_log_finish(
+                    conn,
+                    log_id,
+                    "error",
+                    str(e),
+                    {"days": days},
+                )
+            raise
 
     print(f"Unknown job: {job}")
     return 1
 
+def get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def ensure_collector_log_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS collector_run_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            collector TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            status TEXT NOT NULL,
+            message TEXT,
+            details_json TEXT
+        )
+    """)
+
+
+def collector_log_start(conn, collector: str) -> int:
+    ensure_collector_log_table(conn)
+    cur = conn.execute("""
+        INSERT INTO collector_run_log (collector, started_at, status)
+        VALUES (?, datetime('now'), 'running')
+    """, (collector,))
+    conn.commit()
+    return cur.lastrowid
+
+
+def collector_log_finish(conn, log_id: int, status: str, message: str = "", details: dict | None = None):
+    ensure_collector_log_table(conn)
+    conn.execute("""
+        UPDATE collector_run_log
+        SET finished_at = datetime('now'),
+            status = ?,
+            message = ?,
+            details_json = ?
+        WHERE id = ?
+    """, (
+        status,
+        message,
+        json.dumps(details or {}, ensure_ascii=False),
+        log_id,
+    ))
+    conn.commit()
 
 if __name__ == "__main__":
     raise SystemExit(main())

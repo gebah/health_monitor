@@ -2,19 +2,18 @@ from flask import Flask, render_template, request, jsonify, redirect, current_ap
 from datetime import date, datetime, timedelta, UTC
 from collector import sync_garmin, ensure_manual_recovery_table
 from models import get_daily_metrics_history, calc_body_deltas
-from recovery import get_latest_manual_recovery, get_manual_recovery_series, get_best_recovery_for_day, get_latest_recovery_input, get_recovery_baselines
+from recovery import build_recovery_dashboard, get_latest_manual_recovery, get_manual_recovery_series, get_best_recovery_for_day, get_latest_recovery_input, get_recovery_baselines
 
 import sqlite3
 import json
 import csv
 import io
+import subprocess
 
 app = Flask(__name__)
 app.secret_key = "secret"
 
-#DB = "/home/gba/Documenten/PycharmProjects/health_monitor/health.sqlite"
 DB = "/opt/health_monitor/health.sqlite"
-
 USER_NAME = "Gé"
 USER_HEIGHT = 1.92
 
@@ -76,6 +75,19 @@ def ensure_cache_table(conn):
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        )
+    """)
+    
+def ensure_collector_log_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS collector_run_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            collector TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            status TEXT NOT NULL,
+            message TEXT,
+            details_json TEXT
         )
     """)
 
@@ -1263,159 +1275,232 @@ def get_latest_strava_readiness(conn):
     return row
 
 def build_coach_signals(conn):
-    recovery_summary = build_recovery_summary(conn)
+    recovery_dashboard = build_recovery_dashboard(conn)
+    latest = recovery_dashboard.get("latest") or {}
+    baselines = recovery_dashboard.get("baselines") or {}
+    deltas = recovery_dashboard.get("deltas") or {}
 
     tcl_7d = get_tcl_7d(conn)
+    tl = get_training_load_today(conn)
     strava_status = get_live_strava_status(conn) or {}
 
-    tsb = strava_status.get("form")
-    ctl = strava_status.get("fitness")
-    atl = strava_status.get("fatigue")
+    gauge = calculate_recovery_gauge(
+        latest_hrv=latest.get("hrv_rmssd"),
+        baseline_hrv=baselines.get("hrv_baseline"),
+        sleep_score=latest.get("sleep_score"),
+        avg_stress=latest.get("avg_stress"),
+        body_battery_high=latest.get("body_battery_high"),
+        resting_hr=latest.get("resting_hr"),
+        baseline_rhr=baselines.get("rhr_baseline"),
+        tcl_status=strava_status.get("label") if strava_status else None,
+        manual_penalty=0,
+    )
 
-    signals = {
-        "recovery_summary": recovery_summary,
+    tsb = tl.get("tsb")
+    ctl = tl.get("ctl")
+    atl = tl.get("atl")
+
+    load_flag = "normal"
+    if tsb is not None:
+        tsb_val = float(tsb)
+        if tsb_val <= -20:
+            load_flag = "very_fatigued"
+        elif tsb_val <= -10:
+            load_flag = "fatigued"
+        elif tsb_val >= 10:
+            load_flag = "fresh"
+        else:
+            load_flag = "normal"
+
+    return {
+        "recovery_dashboard": recovery_dashboard,
+        "latest": latest,
+        "baselines": baselines,
+        "deltas": deltas,
+        "gauge": gauge,
         "tcl_7d": tcl_7d,
         "ctl": ctl,
         "atl": atl,
         "tsb": tsb,
-        "load_flag": None,
-        "status": "ready",
-        "priority": None,
+        "load_flag": load_flag,
+        "strava_status": strava_status,
     }
-
-    if tsb is not None:
-        if tsb <= -20:
-            signals["load_flag"] = "very_fatigued"
-        elif tsb <= -10:
-            signals["load_flag"] = "fatigued"
-        elif tsb >= 10:
-            signals["load_flag"] = "fresh"
-        else:
-            signals["load_flag"] = "normal"
-
-    return signals
 
 def build_priority_coach_message(conn):
     s = build_coach_signals(conn)
-    r = s["recovery_summary"]
+
+    latest = s["latest"] or {}
+    baselines = s["baselines"] or {}
+    deltas = s["deltas"] or {}
+    gauge = s["gauge"] or {}
+
+    tsb = s["tsb"]
+    ctl = s["ctl"]
+    atl = s["atl"]
+    tcl_7d = s["tcl_7d"]
+    load_flag = s["load_flag"]
 
     bullets = []
     why = []
-        
-    if r["hrv_status"] == "low":
-        why.append("HRV ligt onder je baseline")
-        bullets.append("HRV ligt onder je baseline")
-    elif r["hrv_status"] == "good":
-        why.append("HRV ligt op of boven je baseline")
-        bullets.append("HRV ligt op of boven je baseline")        
 
-    if r["stress_status"] == "high":
-        why.append("Stress ligt hoger dan normaal")
-        bullets.append("Stress ligt hoger dan normaal")        
-    elif r["stress_status"] == "good":
-        why.append("Stress is lager dan normaal")
-        bullets.append("Stress is lager dan normaal")
+    hrv = latest.get("hrv_rmssd")
+    stress = latest.get("avg_stress")
+    sleep = latest.get("sleep_score")
+    bb = latest.get("body_battery_high")
+    rhr = latest.get("resting_hr")
 
-    if r["sleep_status"] == "low":
-        why.append("Slaapscore is laag")
-        bullets.append("Slaapscore is laag")        
-    elif r["sleep_status"] == "below_baseline":
-        why.append("Slaapscore ligt onder je normale niveau")
-        bullets.append("Slaapscore ligt onder je normale niveau")        
-    elif r["sleep_status"] == "good":
-        why.append("Slaapscore is prima")
-        bullets.append("Slaapscore is prima")       
-        
-    if r["trend"] == "worsening":
-        why.append("Hersteltrend verslechtert")
-        bullets.append("Hersteltrend verslechtert")
-    elif r["trend"] == "improving":
-        why.append("Hersteltrend verbetert")
-        bullets.append("Hersteltrend verbetert")         
+    hrv_delta = deltas.get("hrv_delta")
+    stress_delta = deltas.get("stress_delta")
+    sleep_delta = deltas.get("sleep_delta")
+    bb_delta = deltas.get("bb_delta")
+    rhr_delta = deltas.get("rhr_delta")
 
-    if s["load_flag"] == "very_fatigued":
-        why.append("Trainingsbelasting is zwaar")
-        bullets.append("Strava status wijst op stevige vermoeidheid")
-    elif s["load_flag"] == "fatigued":
-        why.append("Trainingsbelasting loopt op")
+    recovery_score = gauge.get("score")
+    recovery_state = gauge.get("state")
+    recovery_label = gauge.get("label")
+    recovery_reasons = gauge.get("reasons") or []
+
+    if hrv is not None:
+        if hrv_delta is not None and hrv_delta <= -5:
+            bullets.append("HRV ligt duidelijk onder je baseline")
+            why.append("HRV onder baseline")
+        elif hrv_delta is not None and hrv_delta >= 3:
+            bullets.append("HRV ligt op of boven je normale niveau")
+            why.append("HRV goed")
+
+    if sleep is not None:
+        if sleep < 65:
+            bullets.append("Slaapscore is laag")
+            why.append("Slaapscore laag")
+        elif sleep_delta is not None and sleep_delta >= 0:
+            bullets.append("Slaapscore is op peil")
+            why.append("Slaap ok")
+
+    if stress is not None:
+        if stress > 30:
+            bullets.append("Stress ligt verhoogd")
+            why.append("Stress hoog")
+        elif stress_delta is not None and stress_delta <= 0:
+            bullets.append("Stress ligt niet hoger dan normaal")
+            why.append("Stress ok")
+
+    if bb is not None:
+        if bb < 50:
+            bullets.append("Body Battery start laag")
+            why.append("Body Battery laag")
+        elif bb >= 75:
+            bullets.append("Body Battery oogt goed")
+            why.append("Body Battery goed")
+
+    if rhr is not None and rhr_delta is not None:
+        if rhr_delta >= 4:
+            bullets.append("Rusthartslag ligt verhoogd")
+            why.append("RHR verhoogd")
+
+    if load_flag == "very_fatigued":
+        bullets.append("Trainingsbelasting is erg hoog")
+        why.append("Hoge load")
+    elif load_flag == "fatigued":
         bullets.append("Trainingsvermoeidheid loopt op")
-    elif s["load_flag"] == "fresh":
-        why.append("Je bent relatief fris qua trainingsbelasting")
+        why.append("Oplopende load")
+    elif load_flag == "fresh":
         bullets.append("Je bent relatief fris qua trainingsbelasting")
-    else:
-        why.append("Trainingsbelasting is normaal")
-        bullets.append("Trainingsbelasting is normaal")
+        why.append("Frisse load-status")
 
-    if r["latest_notes"]:
-        bullets.append(f"Notitie: {r['latest_notes']}")
+    if recovery_reasons:
+        for reason in recovery_reasons[:2]:
+            if reason not in bullets:
+                bullets.append(reason)
 
-    red_recovery = sum([
-        1 if r["hrv_status"] == "low" else 0,
-        1 if r["stress_status"] == "high" else 0,
-        1 if r["sleep_status"] in ("low", "below_baseline") else 0,
-        1 if r["trend"] == "worsening" else 0,
-    ])
+    status = "ready"
+    priority = "readiness"
+    top_insight = "Er zijn geen sterke rode vlaggen; je bent normaal trainbaar."
+    advice = "Normale trainingsdag is prima, met ruimte om op gevoel bij te sturen."
 
-    heavy_load = s["load_flag"] in ("fatigued", "very_fatigued")
-
-    if red_recovery >= 3 and heavy_load:
+    if recovery_state == "rest":
         status = "recovery_needed"
         priority = "recovery"
-        top_insight = "Zowel herstel als trainingsbelasting staan nu duidelijk onder druk."
-        advice = "Vandaag liefst herstel, wandelen of heel rustig duurwerk. Geen zware sessie."
-    elif red_recovery >= 2:
+        top_insight = "Je hersteldata geven duidelijk aan dat herstel nu prioriteit heeft."
+        advice = "Neem rust of houd het bij wandelen, mobiliteit of zeer rustige duur."
+    elif recovery_state == "walk":
         status = "light_fatigue"
         priority = "recovery"
-        top_insight = "Je herstel is momenteel de beperkende factor."
-        advice = "Hou training licht tot matig en geef slaap en herstel prioriteit."
-    elif heavy_load:
-        if s["load_flag"] == "very_fatigued":
-            status = "recovery_needed"
-            priority = "fatigue"
-            top_insight = "Je trainingsbelasting is nu duidelijk hoger dan je herstel aankan."
-            advice = "Neem gas terug: rustdag of hersteltraining is hier het verstandigst."
-        else:
+        top_insight = "Je herstel is niet slecht, maar wel te matig voor een stevige prikkel."
+        advice = "Kies herstel, wandelen of rustige Z1-Z2 duur. Geen zware sessie."
+    elif recovery_state == "easy":
+        if load_flag in ("fatigued", "very_fatigued"):
             status = "light_fatigue"
             priority = "fatigue"
             top_insight = "Je herstel is redelijk, maar trainingsvermoeidheid stapelt zich op."
-            advice = "Rustige duurtraining of upper body kan prima, zware benenprikkel liever uitstellen."
-    else:
-        if r["trend"] == "improving" and r["sleep_status"] == "good":
-            status = "fresh"
-            priority = "readiness"
-            top_insight = "Je hersteltrend verbetert en de signalen staan er goed voor."
-            advice = "Goede dag voor een normale tot stevige training, mits je benen ook goed voelen."
+            advice = "Houd het gecontroleerd: rustige duur of een lichtere krachtsessie."
         else:
             status = "ready"
             priority = "readiness"
-            top_insight = "Er zijn geen sterke rode vlaggen; je bent normaal trainbaar."
-            advice = "Normale trainingsdag is prima, met wat ruimte om op gevoel te sturen."
+            top_insight = "Je herstel is redelijk, maar nog niet top genoeg voor vol gas."
+            advice = "Prima dag voor een normale training, liever geen maximale intensiteit."
+    elif recovery_state == "train":
+        if load_flag == "fresh":
+            status = "fresh"
+            priority = "performance"
+            top_insight = "Herstel en trainingsbelasting staan gunstig voor kwaliteit."
+            advice = "Goede dag voor tempo, threshold, intervals of een stevige krachtsessie."
+        elif load_flag in ("fatigued", "very_fatigued"):
+            status = "ready"
+            priority = "fatigue"
+            top_insight = "Je herstel oogt goed, maar de opgebouwde belasting vraagt nog wat controle."
+            advice = "Normale training kan prima, maar houd zware benenprikkels gedoseerd."
+        else:
+            status = "ready"
+            priority = "readiness"
+            top_insight = "Je hersteldata ogen goed en er zijn geen duidelijke rode vlaggen."
+            advice = "Goede dag voor een normale tot stevige training."
 
+    confidence = "medium"
+    if baselines.get("n_days", 0) >= 10 and recovery_score is not None:
+        confidence = "high"
+    elif baselines.get("n_days", 0) < 5:
+        confidence = "low"
+        
+    status_icon = {
+    "fresh": "🟢",
+    "ready": "🟢",
+    "light_fatigue": "🟠",
+    "recovery_needed": "🔴",
+    }
+
+    icon = status_icon.get(status, "⚪")
 
     return {
         "status": status,
+        "icon": icon,
         "priority": priority,
         "top_insight": top_insight,
         "bullets": bullets[:5],
         "why": why[:3],
         "advice": advice,
+        "confidence": confidence,
         "recovery": {
-            "hrv_rmssd": r["hrv_today"],
-            "stress": r["stress_today"],
-            "sleep_score": r["sleep_today"],
-            "notes": r["latest_notes"],
+            "day": latest.get("day"),
+            "hrv_rmssd": hrv,
+            "stress": stress,
+            "sleep_score": sleep,
+            "body_battery_high": bb,
+            "resting_hr": rhr,
+            "score": recovery_score,
+            "label": recovery_label,
         },
         "baselines": {
-            "hrv_baseline": r["hrv_baseline"],
-            "stress_baseline": r["stress_baseline"],
-            "sleep_baseline": r["sleep_baseline"],
+            "hrv_baseline": baselines.get("hrv_baseline"),
+            "stress_baseline": baselines.get("stress_baseline"),
+            "sleep_baseline": baselines.get("sleep_baseline"),
+            "bb_baseline": baselines.get("bb_baseline"),
+            "rhr_baseline": baselines.get("rhr_baseline"),
         },
-        "trend": r["trend"],
-        "confidence": r["confidence"],
-        "tsb": s["tsb"],
-        "ctl": s["ctl"],
-        "atl": s["atl"],
-        "tcl_7d": s["tcl_7d"],
+        "deltas": deltas,
+        "tsb": tsb,
+        "ctl": ctl,
+        "atl": atl,
+        "tcl_7d": round(float(tcl_7d), 1) if tcl_7d is not None else None,
     }
 
 @app.route("/api/strava_status_trend")
@@ -2517,21 +2602,55 @@ def api_activity_types():
 
 @app.route("/collectors")
 def collectors():
-    return render_template("collectors.html")
+    with get_conn() as conn:
+        ensure_collector_log_table(conn)
 
+        rows = conn.execute("""
+            SELECT *
+            FROM collector_run_log
+            ORDER BY id DESC
+            LIMIT 10
+        """).fetchall()
+
+    logs = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["details"] = json.loads(item["details_json"]) if item["details_json"] else {}
+        except Exception:
+            item["details"] = {}
+        logs.append(item)
+
+    return render_template(
+        "collectors.html",
+        active_page="collectors",
+        logs=logs,
+    )
 
 @app.route("/collectors/run", methods=["POST"])
 def collectors_run():
     action = request.form["action"]
 
-    if action == "collector_all":
-        sync_all()
-    elif action == "collector_garmin":
-        sync_garmin()
-    elif action == "collector_strava":
-        sync_strava()
+    py = "/opt/health_monitor/.venv/bin/python"
+    cwd = "/opt/health_monitor"
 
-    flash("Collector gestart", "success")
+    with get_conn() as conn:
+        ensure_collector_log_table(conn)
+
+    try:
+        if action == "collector_all":
+            subprocess.Popen([py, "scripts/sync_job.py", "garmin", "30"], cwd=cwd)
+            subprocess.Popen([py, "scripts/sync_job.py", "strava", "30"], cwd=cwd)
+
+        elif action == "collector_garmin":
+            subprocess.Popen([py, "scripts/sync_job.py", "garmin", "30"], cwd=cwd)
+
+        elif action == "collector_strava":
+            subprocess.Popen([py, "scripts/sync_job.py", "strava", "30"], cwd=cwd)
+
+    except Exception as e:
+        flash(f"Collector starten mislukt: {e}", "error")
+
     return redirect("/collectors")
 
 
@@ -2811,48 +2930,54 @@ def recovery():
 
         if request.method == "POST":
             day = request.form.get("day", "").strip()
-            hrv = request.form.get("hrv_rmssd", "").strip()
-            stress = request.form.get("stress", "").strip()
-            sleep_score = request.form.get("sleep_score", "").strip()
             notes = request.form.get("notes", "").strip()
-
-            def to_float(v):
-                if v == "":
-                    return None
-                return float(v.replace(",", "."))
 
             try:
                 conn.execute("""
                     INSERT INTO manual_recovery_entries (
                         day, hrv_rmssd, stress, sleep_score, notes
-                    ) VALUES (?, ?, ?, ?, ?)
+                    ) VALUES (?, NULL, NULL, NULL, ?)
                     ON CONFLICT(day) DO UPDATE SET
-                        hrv_rmssd = excluded.hrv_rmssd,
-                        stress = excluded.stress,
-                        sleep_score = excluded.sleep_score,
                         notes = excluded.notes,
                         created_at = CURRENT_TIMESTAMP
-                """, (
-                    day,
-                    to_float(hrv),
-                    to_float(stress),
-                    to_float(sleep_score),
-                    notes or None,
-                ))
+                """, (day, notes or None))
                 conn.commit()
-                flash("Recovery data opgeslagen.", "success")
+                flash("Notitie opgeslagen.", "success")
                 return redirect(url_for("recovery"))
 
             except Exception as e:
                 flash(f"Opslaan mislukt: {e}", "error")
 
         latest_manual = get_latest_manual_recovery(conn)
+        latest_recovery = get_latest_recovery_input(conn)
+        baselines = get_recovery_baselines(conn)
+        recovery_dashboard = build_recovery_dashboard(conn)
+
+        tl = get_training_load_today(conn)
+        strava_status = get_live_strava_status(conn)
         coach = build_priority_coach_message(conn)
+
+        latest = recovery_dashboard.get("latest") or {}
+        gauge = calculate_recovery_gauge(
+            latest_hrv=latest.get("hrv_rmssd"),
+            baseline_hrv=baselines.get("hrv_baseline"),
+            sleep_score=latest.get("sleep_score"),
+            avg_stress=latest.get("avg_stress"),
+            body_battery_high=latest.get("body_battery_high"),
+            resting_hr=latest.get("resting_hr"),
+            baseline_rhr=baselines.get("rhr_baseline"),
+            tcl_status=strava_status.get("label") if strava_status else None,
+            manual_penalty=0,
+        )
 
     return render_template(
         "recovery.html",
         active_page="recovery",
         latest_manual=latest_manual,
+        latest_recovery=latest_recovery,
+        baselines=baselines,
+        recovery_dashboard=recovery_dashboard,
+        recovery_gauge=gauge,
         coach=coach,
     )
 
