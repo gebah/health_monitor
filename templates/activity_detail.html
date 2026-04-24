@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+<p class="muted">Overzicht van je laatste {{ title|lower }}-activiteiten.</p>
+<section class="card">
+  <div class="card__header">
+    <h3>Coach</h3>
+  </div>
+  <div class="card__body">
+    <p id="activityCoach" class="muted">Laden...</p>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card__header">
+    <h3>Afstand</h3>
+
+    <form method="get">
+      <select name="days" onchange="this.form.submit()">
+        <option value="30" {{ "selected" if days == 30 else "" }}>30 dagen</option>
+        <option value="90" {{ "selected" if days == 90 else "" }}>90 dagen</option>
+        <option value="180" {{ "selected" if days == 180 else "" }}>180 dagen</option>
+        <option value="365" {{ "selected" if days == 365 else "" }}>365 dagen</option>
+      </select>
+    </form>
+  </div>
+
+  <div class="card__body">
+    <div id="distanceChart" style="height:360px;"></div>
+  </div>
+</section>
+
+<section class="grid-2">
+  <div class="card">
+    <div class="card__header">
+      <h3>Duur</h3>
+    </div>
+    <div class="card__body">
+      <div id="durationChart" style="height:320px;"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card__header">
+      <h3>Snelheid / Load</h3>
+    </div>
+    <div class="card__body">
+      <div id="speedLoadChart" style="height:320px;"></div>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card__header">
+    <h3>Laatste activiteiten</h3>
+  </div>
+  <div class="card__body">
+    <div id="activityTable"></div>
+  </div>
+</section>
+
+<script>
+async function loadActivityData() {
+  const days = {{ days|int }};
+  const res = await fetch(`{{ api_url }}?days=${days}`);
+  const payload = await res.json();
+
+  console.log("activity payload", payload);
+
+  const data = payload.items || [];
+  const coach = payload.coach || "Nog geen coachadvies beschikbaar.";
+
+  document.getElementById("activityCoach").textContent = coach;
+
+  if (!data.length) {
+    document.getElementById("distanceChart").innerHTML =
+      "<p class='muted'>Nog geen data beschikbaar.</p>";
+    return;
+  }
+
+  const dates = data.map(d => (d.day || "").slice(0, 10));
+  const names = data.map(d => d.name || "");
+  const distanceKm = data.map(d => Number(d.distance_m || 0) / 1000);
+  const durationMin = data.map(d => Math.round(Number(d.moving_time_s || 0) / 60));
+  const speedKmh = data.map(d => {
+    const km = Number(d.distance_m || 0) / 1000;
+    const h = Number(d.moving_time_s || 0) / 3600;
+    return h > 0 ? km / h : 0;
+  });
+  const load = data.map(d => Number(d.tcl || d.suffer_score || 0));
+
+  const avgDistance = distanceKm.map((_, i, arr) => {
+    const slice = arr.slice(Math.max(0, i - 2), i + 1);
+    return slice.reduce((a, b) => a + b, 0) / slice.length;
+  });
+
+  Plotly.newPlot("distanceChart", [
+    {
+      x: dates,
+      y: distanceKm,
+      type: "bar",
+      name: "Afstand",
+      customdata: names,
+      hovertemplate: "%{x}<br>%{customdata}<br>Afstand: %{y:.1f} km<extra></extra>"
+    },
+    {
+      x: dates,
+      y: avgDistance,
+      type: "scatter",
+      mode: "lines",
+      name: "Trend"
+    }
+  ], {
+    margin: { t: 20, r: 20, b: 40, l: 50 },
+    yaxis: { title: "Km" }
+  }, { responsive: true });
+
+  Plotly.newPlot("durationChart", [{
+    x: dates,
+    y: durationMin,
+    type: "bar",
+    name: "Duur",
+    hovertemplate: "%{x}<br>Duur: %{y} min<extra></extra>"
+  }], {
+    margin: { t: 20, r: 20, b: 40, l: 50 },
+    yaxis: { title: "Minuten" }
+  }, { responsive: true });
+
+  Plotly.newPlot("speedLoadChart", [
+    {
+      x: dates,
+      y: speedKmh,
+      type: "scatter",
+      mode: "lines+markers",
+      name: "Snelheid"
+    },
+    {
+      x: dates,
+      y: load,
+      type: "bar",
+      name: "Load",
+      yaxis: "y2"
+    }
+  ], {
+    margin: { t: 20, r: 50, b: 40, l: 50 },
+    yaxis: { title: "Km/u" },
+    yaxis2: {
+      title: "Load",
+      overlaying: "y",
+      side: "right"
+    }
+  }, { responsive: true });
+
+  const rows = [...data].reverse().map(d => {
+    const km = Number(d.distance_m || 0) / 1000;
+    const min = Math.round(Number(d.moving_time_s || 0) / 60);
+    const h = Number(d.moving_time_s || 0) / 3600;
+    const speed = h > 0 ? km / h : 0;
+
+    return `
+      <tr>
+        <td>${(d.day || "").slice(0, 10)}</td>
+        <td>${d.name || "—"}</td>
+        <td>${d.type || "—"}</td>
+        <td>${km.toFixed(1)} km</td>
+        <td>${min} min</td>
+        <td>${speed.toFixed(1)} km/u</td>
+        <td>${Number(d.tcl || d.suffer_score || 0).toFixed(1)}</td>
+      </tr>
+    `;
+  }).join("");
+
+  document.getElementById("activityTable").innerHTML = `
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Naam</th>
+          <th>Type</th>
+          <th>Afstand</th>
+          <th>Duur</th>
+          <th>Snelheid</th>
+          <th>Load</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+loadActivityData();
+</script>
+{% endblock %}

@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Krachttraining{% endblock %}
+
+{% block content %}
+<h1>Krachttraining</h1>
+<p class="muted">Overzicht van je laatste krachttrainingen op basis van Garmin FIT-data.</p>
+
+<section class="card">
+  <div class="card__header">
+    <h3>Coach</h3>
+  </div>
+  <div class="card__body">
+    <p id="strengthCoach" class="muted">Laden...</p>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card__header">
+    <h3>Training load</h3>
+
+    <form method="get">
+      <select name="days" onchange="this.form.submit()">
+        <option value="30" {{ "selected" if days == 30 else "" }}>30 dagen</option>
+        <option value="90" {{ "selected" if days == 90 else "" }}>90 dagen</option>
+        <option value="180" {{ "selected" if days == 180 else "" }}>180 dagen</option>
+      </select>
+    </form>
+  </div>
+
+  <div class="card__body">
+    <div id="strengthLoadChart" style="height:360px;"></div>
+  </div>
+</section>
+
+<section class="grid-2">
+  <div class="card">
+    <div class="card__header">
+      <h3>Sets & reps</h3>
+    </div>
+    <div class="card__body">
+      <div id="strengthSetsRepsChart" style="height:320px;"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card__header">
+      <h3>Duur</h3>
+    </div>
+    <div class="card__body">
+      <div id="strengthDurationChart" style="height:320px;"></div>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card__header">
+    <h3>Laatste trainingen</h3>
+  </div>
+  <div class="card__body">
+    <div id="strengthTable"></div>
+  </div>
+</section>
+
+<script>
+async function loadStrengthData() {
+  const days = {{ days|int }};
+  const res = await fetch(`/api/strength?days=${days}`);
+  const data = await res.json();
+
+  const coachEl = document.getElementById("strengthCoach");
+
+  const last3 = data.slice(-3);
+  const prev3 = data.slice(-6, -3);
+
+  const sum = (items, key) =>
+    items.reduce((acc, d) => acc + Number(d[key] || 0), 0);
+
+  const recentLoad = sum(last3, "strength_load");
+  const prevLoad = sum(prev3, "strength_load");
+  const recentSessions = last3.length;
+
+  let coach = "Nog onvoldoende data voor een krachttrend.";
+
+  if (recentSessions === 0) {
+    coach = "Geen recente krachttraining → plan minimaal één onderhoudsprikkel.";
+  } else if (prevLoad > 0 && recentLoad > prevLoad * 1.10) {
+    coach = "Krachtbelasting stijgt mooi → goede overload-prikkel, bewaak herstel.";
+  } else if (prevLoad > 0 && recentLoad < prevLoad * 0.80) {
+    coach = "Krachtbelasting duidelijk lager → prima als deload, anders volgende week weer opbouwen.";
+  } else if (recentSessions >= 2) {
+    coach = "Krachttraining is goed aanwezig → sterke basis voor spierbehoud en progressie.";
+  } else {
+    coach = "Eén recente krachttraining → onderhoud, maar beperkte progressieprikkel.";  
+  }
+
+  coachEl.textContent = coach;
+
+  if (!data.length) {
+    document.getElementById("strengthLoadChart").innerHTML =
+      "<p class='muted'>Nog geen krachttraining-data beschikbaar.</p>";
+    return;
+  }
+
+  const dates = data.map(d => d.day);
+  const load = data.map(d => Number(d.strength_load || 0) / 1000);
+  const sets = data.map(d => Number(d.total_sets || 0));
+  const reps = data.map(d => Number(d.total_reps || 0));
+  const duration = data.map(d => Math.round(Number(d.duration_s || 0) / 60));
+  const avgLoad = load.map((_, i, arr) => {
+    const slice = arr.slice(Math.max(0, i - 2), i + 1);
+    return slice.reduce((a, b) => a + b, 0) / slice.length;
+  });
+
+  Plotly.newPlot("strengthLoadChart", [{
+    x: dates,
+    y: load,
+    type: "bar",
+    name: "Load"
+  },
+  {
+    x: dates,
+    y: avgLoad,
+    type: "scatter",
+    mode: "lines",
+    name: "Trend"
+  }], {
+    margin: { t: 20, r: 20, b: 40, l: 50 },
+    yaxis: { title: "Load (x 1000 kg)" },
+    xaxis: { title: "" }
+  }, { responsive: true });
+
+  Plotly.newPlot("strengthSetsRepsChart", [
+    {
+      x: dates,
+      y: sets,
+      type: "bar",
+      name: "Sets"
+    },
+    {
+      x: dates,
+      y: reps,
+      type: "scatter",
+      mode: "lines+markers",
+      name: "Reps",
+      yaxis: "y2"
+    }
+  ], {
+    margin: { t: 20, r: 50, b: 40, l: 45 },
+    yaxis: { title: "Sets" },
+    yaxis2: {
+      title: "Reps",
+      overlaying: "y",
+      side: "right"
+    }
+  }, { responsive: true });
+
+  Plotly.newPlot("strengthDurationChart", [{
+    x: dates,
+    y: duration,
+    type: "bar",
+    name: "Minuten"
+  }], {
+    margin: { t: 20, r: 20, b: 40, l: 50 },
+    yaxis: { title: "Minuten" }
+  }, { responsive: true });
+
+  const rows = [...data].reverse().map(d => `
+    <tr>
+      <td>${d.day}</td>
+      <td>${d.name || "Kracht"}</td>
+      <td>${Math.round((d.duration_s || 0) / 60)} min</td>
+      <td>${d.total_sets || 0}</td>
+      <td>${d.total_reps || 0}</td>
+      <td>${Number(d.strength_load || 0).toFixed(1)}</td>
+    </tr>
+  `).join("");
+
+  document.getElementById("strengthTable").innerHTML = `
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Naam</th>
+          <th>Duur</th>
+          <th>Sets</th>
+          <th>Reps</th>
+          <th>Load</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+loadStrengthData();
+</script>
+{% endblock %}

@@ -5,13 +5,17 @@ import json
 import os
 import sqlite3
 import time
+from garth import data
 import requests
+import zipfile
 
 from datetime import datetime, timedelta, date, UTC
 from typing import Any
 from garminconnect import Garmin
 from dotenv import load_dotenv
 from readiness import compute_strava_readiness_series
+
+from fitparse import FitFile 
 
 load_dotenv("/etc/health_monitor.env")
 
@@ -167,7 +171,24 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(strava_activities)").fetchall()}
     if "tcl" not in cols:
         conn.execute("ALTER TABLE strava_activities ADD COLUMN tcl REAL")
+        
+    conn.commit()
 
+def ensure_strength_schema(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS strength_sessions (
+            activity_id TEXT PRIMARY KEY,
+            day TEXT,
+            name TEXT,
+            activity_type TEXT,
+            duration_s INTEGER,
+            total_volume REAL,
+            total_reps INTEGER,
+            total_sets INTEGER,
+            raw_json TEXT,
+            synced_at TEXT
+        )
+    """)
     conn.commit()
 
 def ensure_manual_recovery_table(conn):
@@ -239,7 +260,6 @@ def upsert_activities(conn: sqlite3.Connection, acts: list[dict[str, Any]]) -> i
 
     conn.commit()
     return n
-
 
 # ----------------------------
 # Garmin Daily Metrics Sync
@@ -364,98 +384,118 @@ def fetch_and_store_daily_metrics(api: Garmin, conn: sqlite3.Connection, days: i
 
     return saved
 
-# def fetch_and_store_daily_metrics(api: Garmin, conn: sqlite3.Connection, days: int) -> int:
-#     now = datetime.now()
-#     synced_at = now.isoformat(timespec="seconds")
-#     saved = 0
+def sync_strength_fit_data(api, conn, activities):
+    ensure_strength_schema(conn)
 
-#     for i in range(days):
-#         d = (now.date() - timedelta(days=i)).isoformat()
+    os.makedirs(FIT_DIR, exist_ok=True)
+    synced_at = datetime.now().isoformat(timespec="seconds")
+    saved = 0
 
-#         sleep = safe_call(api.get_sleep_data, d)
-#         stress = safe_call(api.get_stress_data, d)
-#         hrv = safe_call(api.get_hrv_data, d)
-#         bb = safe_call(api.get_body_battery, d)
-#         rhr = safe_call(api.get_rhr_day, d)
+    for activity in activities:
+        if not isinstance(activity, dict):
+            continue
 
-#         payload: dict[str, Any] = {
-#             "sleep_seconds": None,
-#             "sleep_score": None,
-#             "resting_hr": None,
-#             "avg_stress": None,
-#             "hrv_rmssd": None,
-#             "bb_high": None,
-#             "bb_low": None,
-#             "raw_json": None,
-#         }
+        # Alleen echte Garmin strength_training activiteiten
+        if not is_strength_activity(activity):
+            continue
 
-#         raw = {"sleep": sleep, "stress": stress, "hrv": hrv, "bb": bb, "rhr": rhr}
+        activity_id = get_activity_id(activity)
+        if not activity_id:
+            print("SKIP strength: no activity_id", flush=True)
+            continue
 
-#         if isinstance(sleep, dict):
-#             payload["sleep_seconds"] = pick_first(sleep, [
-#                 "dailySleepDTO.sleepTimeSeconds",
-#                 "dailySleepDTO.totalSleepSeconds",
-#             ])
-#             payload["sleep_score"] = pick_first(sleep, [
-#                 "dailySleepDTO.sleepScore",
-#                 "dailySleepDTO.overallSleepScore",
-#                 "dailySleepDTO.sleepScores.overall.value",
-#             ])
-#             payload["resting_hr"] = pick_first(sleep, [
-#                 "restingHeartRate",
-#                 "dailySleepDTO.restingHeartRate",
-#             ])
-#             payload["hrv_rmssd"] = pick_first(sleep, [
-#                 "avgOvernightHrv",
-#                 "dailySleepDTO.avgOvernightHrv",
-#             ])
+        activity_type_obj = activity.get("activityType") or activity.get("activitytype") or {}
+        type_key = ""
+        if isinstance(activity_type_obj, dict):
+            type_key = (
+                activity_type_obj.get("typeKey")
+                or activity_type_obj.get("typekey")
+                or ""
+            ).lower()
 
-#         if isinstance(stress, dict):
-#             payload["avg_stress"] = pick_first(stress, [
-#                 "avgStressLevel",
-#                 "averageStressLevel",
-#             ])
+        start_time_local = (
+            activity.get("startTimeLocal")
+            or activity.get("start_time_local")
+            or activity.get("start_date_local")
+            or activity.get("startTimeGMT")
+        )
 
-#         if payload["hrv_rmssd"] is None and isinstance(hrv, dict):
-#             payload["hrv_rmssd"] = pick_first(hrv, [
-#                 "hrvSummary.rmssd",
-#                 "hrvSummary.avgRmssd",
-#                 "hrvSummary.overallRmssd",
-#             ])
+        day = str(start_time_local)[:10] if start_time_local else None
 
-#         if isinstance(bb, list) and bb and isinstance(bb[0], dict):
-#             arr = bb[0].get("bodyBatteryValuesArray")
-#             if isinstance(arr, list) and arr:
-#                 vals = []
-#                 for item in arr:
-#                     if isinstance(item, (int, float)):
-#                         vals.append(float(item))
-#                     elif isinstance(item, (list, tuple)) and len(item) >= 2 and isinstance(item[1], (int, float)):
-#                         vals.append(float(item[1]))
-#                     elif isinstance(item, dict):
-#                         for k in ("value", "bodyBattery", "bb"):
-#                             if k in item and isinstance(item[k], (int, float)):
-#                                 vals.append(float(item[k]))
-#                                 break
-#                 if vals:
-#                     payload["bb_high"] = max(vals)
-#                     payload["bb_low"] = min(vals)
+        name = (
+            activity.get("activityName")
+            or activity.get("activityname")
+            or activity.get("name")
+            or ""
+        )
 
-#         if payload["resting_hr"] is None and isinstance(rhr, dict):
-#             payload["resting_hr"] = pick_first(rhr, [
-#                 "allMetrics.restingHeartRate.value",
-#                 "allMetrics.RESTING_HEART_RATE.value",
-#             ])
+        duration_s = (
+            activity.get("duration")
+            or activity.get("moving_time_s")
+            or activity.get("movingDuration")
+            or activity.get("movingduration")
+        )
 
-#         payload["raw_json"] = json.dumps(raw, ensure_ascii=False)
+        print(
+            "DOWNLOADING STRENGTH FIT:",
+            activity_id,
+            name,
+            start_time_local,
+            type_key,
+            flush=True,
+        )
 
-#         if any(payload[k] is not None for k in (
-#             "sleep_seconds", "sleep_score", "resting_hr", "avg_stress", "hrv_rmssd", "bb_high", "bb_low"
-#         )):
-#             upsert_daily_metrics(conn, d, payload, synced_at)
-#             saved += 1
+        fit_path = os.path.join(FIT_DIR, f"{activity_id}.fit")
+        fit_path = download_fit_file(api, activity_id, fit_path)
 
-#     return saved
+        if not fit_path:
+            print(f"SKIP strength {activity_id}: no fit file", flush=True)
+            continue
+
+        parsed = parse_strength_fit(fit_path)
+        duration_min = int(duration_s or 0) / 60.0
+
+        strength_load = (
+            float(parsed.get("total_sets") or 0) * 5.0 +
+            float(parsed.get("total_reps") or 0) * 0.5 +
+            duration_min * 0.3
+        )
+
+        if parsed.get("error"):
+            print(f"[warn] FIT parse failed for {activity_id}: {parsed['error']}", flush=True)
+
+        conn.execute("""
+            INSERT OR REPLACE INTO strength_sessions (
+                activity_id,
+                day,
+                name,
+                activity_type,
+                duration_s,
+                total_volume,
+                total_reps,
+                total_sets,
+                strength_load,
+                raw_json,
+                synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            str(activity_id),
+            day,
+            name,
+            type_key,
+            int(duration_s or 0),
+            parsed.get("total_volume"),
+            parsed.get("total_reps"),
+            parsed.get("total_sets"),
+            strength_load,
+            json.dumps(parsed, ensure_ascii=False),
+            synced_at,
+        ))
+
+        saved += 1
+
+    conn.commit()
+    return saved
 
 
 # ----------------------------
@@ -685,10 +725,14 @@ def sync_garmin(days: int = SYNC_DAYS) -> tuple[int, int]:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         ensure_schema(conn)
+        ensure_strength_schema(conn)
 
         acts = fetch_activities(api, days)
         n_acts = upsert_activities(conn, acts)
         n_days = fetch_and_store_daily_metrics(api, conn, days)
+
+        n_strength = sync_strength_fit_data(api, conn, acts)
+        print(f"[ok] Strength FIT sync: {n_strength} sessions")
 
     return n_acts, n_days
 
@@ -808,6 +852,248 @@ def collector_log_finish(conn, log_id: int, status: str, message: str = "", deta
         log_id,
     ))
     conn.commit()
+
+FIT_DIR = "/opt/health_monitor/data/fit"
+
+
+def ensure_strength_schema(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS strength_sessions (
+            activity_id TEXT PRIMARY KEY,
+            day TEXT,
+            name TEXT,
+            activity_type TEXT,
+            duration_s INTEGER,
+            total_volume REAL,
+            total_reps INTEGER,
+            total_sets INTEGER,
+            raw_json TEXT,
+            synced_at TEXT
+        )
+    """)
+    conn.commit()
+
+def is_strength_activity(activity: dict) -> bool:
+    activity_type = activity.get("activityType") or activity.get("activitytype") or {}
+
+    if not isinstance(activity_type, dict):
+        return False
+
+    type_key = (
+        activity_type.get("typeKey")
+        or activity_type.get("typekey")
+        or ""
+    ).lower()
+
+    return type_key == "strength_training"
+
+def get_activity_id(activity: dict):
+    return (
+        activity.get("activityId")
+        or activity.get("activity_id")
+        or activity.get("id")
+    )
+
+
+def download_fit_file(api, activity_id, fit_path):
+    os.makedirs(os.path.dirname(fit_path), exist_ok=True)
+
+    # Als er al een geldige FIT staat: hergebruiken
+    if os.path.exists(fit_path):
+        try:
+            with open(fit_path, "rb") as f:
+                header = f.read(20)
+
+            if b".FIT" in header:
+                return fit_path
+
+            print(f"[warn] existing file is not a valid FIT, redownloading: {fit_path}", flush=True)
+            os.remove(fit_path)
+
+        except Exception as e:
+            print(f"[warn] could not validate existing FIT {fit_path}: {e}", flush=True)
+            try:
+                os.remove(fit_path)
+            except Exception:
+                pass
+
+    try:
+        data = api.download_activity(
+            activity_id,
+            dl_fmt=api.ActivityDownloadFormat.ORIGINAL
+        )
+    except Exception as e:
+        print(f"[warn] ORIGINAL download failed for {activity_id}: {e}", flush=True)
+        return None
+
+    if not data:
+        print(f"[warn] empty download for {activity_id}", flush=True)
+        return None
+
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+
+    print(f"download bytes header for {activity_id}: {data[:8]!r}", flush=True)
+
+    # ORIGINAL is vaak een ZIP
+    if data[:2] == b"PK":
+        zip_path = fit_path.replace(".fit", ".zip")
+
+        try:
+            with open(zip_path, "wb") as f:
+                f.write(data)
+
+            with zipfile.ZipFile(zip_path, "r") as z:
+                fit_names = [
+                    n for n in z.namelist()
+                    if n.lower().endswith(".fit")
+                ]
+
+                if not fit_names:
+                    print(f"[warn] no .fit found in zip for {activity_id}: {z.namelist()}", flush=True)
+                    return None
+
+                # Meestal is er maar één FIT. Als er meerdere zijn, pak de grootste.
+                fit_names = sorted(
+                    fit_names,
+                    key=lambda n: z.getinfo(n).file_size,
+                    reverse=True,
+                )
+
+                with z.open(fit_names[0]) as src:
+                    fit_bytes = src.read()
+
+                if b".FIT" not in fit_bytes[:20]:
+                    print(f"[warn] extracted file is not valid FIT for {activity_id}: {fit_names[0]}", flush=True)
+                    return None
+
+                with open(fit_path, "wb") as dst:
+                    dst.write(fit_bytes)
+
+            return fit_path
+
+        except Exception as e:
+            print(f"[warn] unzip failed for {activity_id}: {e}", flush=True)
+            return None
+
+    # Soms krijg je direct een FIT
+    if b".FIT" in data[:20]:
+        with open(fit_path, "wb") as f:
+            f.write(data)
+        return fit_path
+
+    print(f"[warn] downloaded file is not FIT/ZIP for {activity_id}: {data[:120]!r}", flush=True)
+    return None
+
+def parse_strength_fit(fit_path):
+    total_volume = 0.0
+    total_reps = 0
+    total_sets = 0
+    sets = []
+
+    try:
+        fitfile = FitFile(fit_path)
+        
+    except Exception as e:
+        return {
+            "total_volume": 0.0,
+            "total_reps": 0,
+            "total_sets": 0,
+            "sets": [],
+            "error": str(e),
+        }
+
+    for msg in fitfile.get_messages():        
+        if msg.name not in ("set", "record"):
+            continue
+
+        data = {field.name: field.value for field in msg}
+
+        if msg.name == "set" and data.get("set_type") == "rest":
+            continue
+
+        if msg.name == "set":
+            print("ACTIVE SET DATA:", data, flush=True)
+
+            reps = (
+                data.get("repetitions")
+                or data.get("reps")
+                or data.get("num_repetitions")
+            )
+
+        weight = (
+            data.get("weight")
+            or data.get("weight_display_unit")
+        )
+
+        exercise = (
+            data.get("exercise_name")
+            or data.get("wkt_step_name")
+            or data.get("category")
+        )
+
+        try:
+            reps_val = int(reps) if reps is not None else None
+        except Exception:
+            reps_val = None
+
+        try:
+            weight_val = float(weight) if weight is not None else None
+        except Exception:
+            weight_val = None
+
+        if reps_val is None:
+            continue
+
+        total_sets += 1
+        total_reps += reps_val
+
+        volume = None
+        if weight_val is not None:
+            volume = reps_val * weight_val
+            total_volume += volume
+
+        sets.append({
+            "exercise": str(exercise) if exercise is not None else None,
+            "reps": reps_val,
+            "weight": weight_val,
+            "volume": volume,
+        })
+
+    return {
+        "total_volume": round(total_volume, 1),
+        "total_reps": total_reps,
+        "total_sets": total_sets,
+        "sets": sets,
+    }
+    
+def debug_fit_messages(fit_path, limit=80):
+    fitfile = FitFile(fit_path)
+
+    seen = 0
+    for msg in fitfile.get_messages():
+        data = {field.name: field.value for field in msg}
+
+        interesting = any(
+            k in data
+            for k in [
+                "repetitions",
+                "weight",
+                "exercise_name",
+                "category",
+                "wkt_step_name",
+                "set_type",
+                "message_index",
+            ]
+        )
+
+        if msg.name in ("set", "record", "lap", "session") or interesting:
+            print("MSG:", msg.name, data, flush=True)
+            seen += 1
+
+        if seen >= limit:
+            break    
+
 
 # ----------------------------
 # Main

@@ -1,3 +1,5 @@
+from pyexpat.errors import messages
+
 from flask import Flask, render_template, request, jsonify, redirect, current_app, url_for, flash
 from datetime import date, datetime, timedelta, UTC
 from collector import sync_garmin, ensure_manual_recovery_table
@@ -37,6 +39,23 @@ def to_float(value, default=None):
 def match_activity_type(activity_type, keywords):
     t = (activity_type or "").lower()
     return any(k in t for k in keywords)
+
+def strength_load_factor(activity):
+    name = (activity.get("name") or "").lower()
+    atype = (activity.get("type") or "").lower()
+
+    if "workout" in atype:
+        base = 1.1
+    else:
+        base = 1.0
+
+    if any(k in name for k in ["deadlift", "squat", "bench", "heavy", "zwaar"]):
+        return base * 1.3
+
+    if any(k in name for k in ["core", "mobility", "stretch"]):
+        return base * 0.6
+
+    return base
 
 def format_duration_short(seconds):
     if seconds is None:
@@ -1274,6 +1293,72 @@ def get_latest_strava_readiness(conn):
 
     return row
 
+def build_strength_coach_message(comp):
+    strength = comp.get("strength", {})
+
+    count = strength.get("count", {})
+    load = strength.get("load", {})
+    sets = strength.get("sets", {})
+    reps = strength.get("reps", {})
+
+    sessions = count.get("current", 0) or 0
+    load_delta_pct = load.get("trend_pct", 0) or 0
+    sets_delta_pct = sets.get("trend_pct", 0) or 0
+    reps_delta_pct = reps.get("trend_pct", 0) or 0
+
+    if sessions == 0:
+        return "Geen krachttraining deze week → plan minimaal één onderhoudsprikkel."
+
+    if load_delta_pct > 10 and sessions >= 2:
+        return "Krachtbelasting stijgt mooi → goede overload-prikkel, bewaak herstel."
+
+    if load_delta_pct < -20:
+        return "Krachtbelasting duidelijk lager → prima als deload, anders volgende week weer oppakken."
+
+    if reps_delta_pct > 10 and sets_delta_pct >= 0:
+        return "Meer reps bij stabiele sets → goede volumegroei."
+
+    if sessions >= 2:
+        return "Krachttraining is goed aanwezig deze week → prima basis voor spierbehoud."
+
+    return "Eén krachttraining deze week → onderhoud, maar weinig progressieprikkel."
+
+def build_activity_page_coach(kind, rows):
+    if not rows:
+        return "Nog geen data beschikbaar voor een betrouwbare trend."
+
+    recent = rows[-3:]
+    older = rows[-6:-3]
+
+    def total_distance(items):
+        return sum(float(r["distance_m"] or 0) for r in items) / 1000
+
+    def total_duration(items):
+        return sum(float(r["moving_time_s"] or 0) for r in items) / 60
+
+    recent_km = total_distance(recent)
+    older_km = total_distance(older)
+    recent_min = total_duration(recent)
+    older_min = total_duration(older)
+
+    if kind == "cycling":
+        if recent_km > older_km * 1.2 and recent_km > 30:
+            return "Fietsvolume loopt op → mooie opbouw, maar bewaak herstel."
+        if recent_km < older_km * 0.7 and older_km > 20:
+            return "Fietsvolume ligt duidelijk lager → prima als herstelblok, anders weer rustig opbouwen."
+        return "Fietstrend oogt stabiel → goede basis om gecontroleerd door te bouwen."
+
+    if kind == "walking":
+        if recent_min > older_min * 1.2 and recent_min > 90:
+            return "Wandelvolume is hoog → sterk voor herstel en basisconditie."
+        if recent_min < older_min * 0.7 and older_min > 60:
+            return "Je wandelt minder dan eerder → mogelijk wat minder herstelbeweging."
+        return "Wandelritme is redelijk stabiel → mooi ondersteunend voor herstel."
+
+    return "Trend oogt stabiel."
+
+
+
 def build_coach_signals(conn):
     recovery_dashboard = build_recovery_dashboard(conn)
     latest = recovery_dashboard.get("latest") or {}
@@ -1913,15 +1998,6 @@ def trend_meta(delta, current, previous):
 
 
 def get_activity_summary_period(conn, start_day, end_day):
-    rows = conn.execute("""
-        SELECT
-            type,
-            COALESCE(distance_m, 0) AS distance_m,
-            COALESCE(moving_time_s, 0) AS duration_s
-        FROM strava_activities
-        WHERE date(start_time_local) BETWEEN ? AND ?
-    """, (start_day.isoformat(), end_day.isoformat())).fetchall()
-
     summary = {
         "walk_count": 0,
         "walk_distance_km": 0.0,
@@ -1931,7 +2007,20 @@ def get_activity_summary_period(conn, start_day, end_day):
         "ride_duration_s": 0,
         "strength_count": 0,
         "strength_duration_s": 0,
+        "strength_load": 0.0,
+        "strength_sets": 0,
+        "strength_reps": 0,
     }
+
+    # Cardio / wandelen / fietsen uit Strava
+    rows = conn.execute("""
+        SELECT
+            type,
+            COALESCE(distance_m, 0) AS distance_m,
+            COALESCE(moving_time_s, 0) AS duration_s
+        FROM strava_activities
+        WHERE date(start_time_local) BETWEEN date(?) AND date(?)
+    """, (start_day.isoformat(), end_day.isoformat())).fetchall()
 
     for row in rows:
         t = row["type"]
@@ -1948,9 +2037,28 @@ def get_activity_summary_period(conn, start_day, end_day):
             summary["ride_distance_km"] += d / 1000
             summary["ride_duration_s"] += s
 
-        elif match_activity_type(t, ["strength", "weight", "workout"]):
-            summary["strength_count"] += 1
-            summary["strength_duration_s"] += s
+    # Kracht uit Garmin/FIT strength_sessions
+    try:
+        row = conn.execute("""
+                SELECT
+                    COUNT(*) AS cnt,
+                    COALESCE(SUM(duration_s), 0) AS duration_s,
+                    COALESCE(SUM(strength_load), 0) AS load,
+                    COALESCE(SUM(total_sets), 0) AS sets,
+                    COALESCE(SUM(total_reps), 0) AS reps
+                FROM strength_sessions
+                WHERE day BETWEEN ? AND ?
+            """, (start_day.isoformat(), end_day.isoformat())).fetchone()
+
+        if row:
+            summary["strength_count"] = int(row["cnt"] or 0)
+            summary["strength_duration_s"] = int(row["duration_s"] or 0)
+            summary["strength_load"] = round(float(row["load"] or 0), 1)
+            summary["strength_sets"] = int(row["sets"] or 0)
+            summary["strength_reps"] = int(row["reps"] or 0)
+
+    except sqlite3.OperationalError as e:
+        print(f"[warn] strength summary unavailable: {e}", flush=True)
 
     return summary
 
@@ -1963,11 +2071,14 @@ def trend_arrow(delta):
 
 
 def build_comparison(this_week, prev_week, start_day, end_day):
+    this_week = this_week or {}
+    prev_week = prev_week or {}
+    
     def cmp(key):
-        current = this_week.get(key, 0)
-        previous = prev_week.get(key, 0)
+        current = this_week.get(key, 0) or 0
+        previous = prev_week.get(key, 0) or 0
         delta = current - previous
-        trend = trend_meta(delta, current, previous)    
+        trend = trend_meta(delta, current, previous)
 
         return {
             "current": current,
@@ -1996,12 +2107,30 @@ def build_comparison(this_week, prev_week, start_day, end_day):
         "strength": {
             "count": cmp("strength_count"),
             "duration": cmp("strength_duration_s"),
+            "load": cmp("strength_load"),
+            "sets": cmp("strength_sets"),
+            "reps": cmp("strength_reps"),
         },
     }
 
 def build_week_coach_message(comp, readiness_score=None, form=None):
-    ride_delta = comp["ride"]["distance"]["delta"]
-    strength_delta = comp["strength"]["count"]["delta"]
+    ride_delta = (
+        comp.get("ride", {})
+            .get("distance", {})
+            .get("delta", 0)
+    )
+
+    strength = comp.get("strength", {})
+
+    strength_delta = (
+        strength.get("count", strength.get("sessions", {}))
+            .get("delta", 0)
+    )
+
+    strength_load_delta = (
+        strength.get("load", {})
+            .get("delta", 0)
+    )
 
     messages = []
 
@@ -2009,11 +2138,6 @@ def build_week_coach_message(comp, readiness_score=None, form=None):
         messages.append("meer fietsvolume dan vorige week")
     elif ride_delta < -30:
         messages.append("minder fietsvolume dan vorige week")
-
-    if strength_delta > 0:
-        messages.append("meer krachttraining")
-    elif strength_delta < 0:
-        messages.append("minder krachttraining")
 
     low_readiness = readiness_score is not None and readiness_score < 45
     good_readiness = readiness_score is not None and readiness_score >= 65
@@ -2030,7 +2154,6 @@ def build_week_coach_message(comp, readiness_score=None, form=None):
     sentence = " · ".join(messages)
     return sentence[:1].upper() + sentence[1:] + "."
 
-
 def get_week_comparison(conn, readiness_score=None, form=None):
     today = datetime.now().date()
 
@@ -2044,6 +2167,7 @@ def get_week_comparison(conn, readiness_score=None, form=None):
     prev_week = get_activity_summary_period(conn, start_prev, end_prev)
 
     comp = build_comparison(this_week, prev_week, start_this, end_this)
+    comp["strength_coach"] = build_strength_coach_message(comp)
     comp["coach"] = build_week_coach_message(
         comp,
         readiness_score=readiness_score,
@@ -2092,6 +2216,91 @@ def build_week_readiness_message(week_comp, readiness_score=None, form=None):
     if heavy_fatigue:
         return "Je weekbelasting loopt op en je vorm is wat vermoeid → bewaak herstel."
     return "Vrij stabiele trainingsweek met een neutrale herstelindruk."
+
+@app.route("/cycling")
+def cycling_page():
+    days = int(request.args.get("days", 90))
+    return render_template(
+        "activity_detail.html",
+        active_page="cycling",
+        title="Fietsen",
+        days=days,
+        api_url="/api/cycling",
+        kind="cycling",
+    )
+
+
+@app.route("/walking")
+def walking_page():
+    days = int(request.args.get("days", 90))
+    return render_template(
+        "activity_detail.html",
+        active_page="walking",
+        title="Wandelen",
+        days=days,
+        api_url="/api/walking",
+        kind="walking",
+    )
+
+def get_strength_week_summary(conn):
+    today = datetime.now().date()
+
+    start_this = today - timedelta(days=today.weekday())
+    end_this = start_this + timedelta(days=6)
+
+    start_prev = start_this - timedelta(days=7)
+    end_prev = start_this - timedelta(days=1)
+
+    def fetch_period(start_day, end_day):
+        rows = conn.execute("""
+            SELECT
+                name,
+                type,
+                sport_type,
+                moving_time_s
+            FROM strava_activities
+            WHERE date(start_time_local) BETWEEN ? AND ?
+              AND (
+                lower(type) LIKE '%weight%'
+                OR lower(type) LIKE '%strength%'
+                OR lower(type) LIKE '%workout%'
+                OR lower(sport_type) LIKE '%weight%'
+                OR lower(sport_type) LIKE '%strength%'
+                OR lower(sport_type) LIKE '%workout%'
+              )
+        """, (start_day.isoformat(), end_day.isoformat())).fetchall()
+
+        sessions = 0
+        duration_s = 0
+        load = 0.0
+
+        for r in rows:
+            a = dict(r)
+            minutes = float(a.get("moving_time_s") or 0) / 60.0
+            factor = strength_load_factor(a)
+
+            sessions += 1
+            duration_s += int(a.get("moving_time_s") or 0)
+            load += minutes * factor
+
+        return {
+            "sessions": sessions,
+            "duration_s": duration_s,
+            "duration_min": round(duration_s / 60, 0),
+            "load": round(load, 1),
+        }
+
+    current = fetch_period(start_this, end_this)
+    previous = fetch_period(start_prev, end_prev)
+
+    return {
+        "current": current,
+        "previous": previous,
+        "delta_sessions": current["sessions"] - previous["sessions"],
+        "delta_duration_min": current["duration_min"] - previous["duration_min"],
+        "delta_load": round(current["load"] - previous["load"], 1),
+    }
+
 
 @app.route("/")
 def home():
@@ -2279,12 +2488,13 @@ def home():
         week_activity = get_week_activity_summary(conn)        
       
         week_comp = get_week_comparison(
-            conn, 
-            readiness_score=readiness.get("score"), 
+            conn,
+            readiness_score=readiness.get("score"),
             form=form,
-        )
-    
+    )
 
+        strength_week = week_comp.get("strength", {})
+    
     return render_template(
         "home.html",
         active_page="home",
@@ -2321,6 +2531,7 @@ def home():
         format_duration_short=format_duration_short,
         format_km=format_km,
         week_comp=week_comp,
+        strength_week=strength_week,
     )
 
     
@@ -2346,7 +2557,91 @@ def training_load_page():
         days=days
     )
 
-from datetime import date, timedelta
+
+@app.route("/strength")
+def strength_page():
+    days = int(request.args.get("days", 90))
+    return render_template(
+        "strength.html",
+        active_page="strength",
+        days=days,
+    )
+
+@app.route("/api/strength")
+def api_strength():
+    days = int(request.args.get("days", 90))
+
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                day,
+                name,
+                duration_s,
+                total_sets,
+                total_reps,
+                strength_load
+            FROM strength_sessions
+            WHERE day >= date('now', ?)
+            ORDER BY day ASC
+        """, (f"-{days} days",)).fetchall()
+
+    return jsonify([dict(r) for r in rows])
+
+def api_activity_kind(kind):
+    days = int(request.args.get("days", 90))
+
+    if kind == "cycling":
+        type_filter = """
+          AND (
+            lower(type) LIKE '%ride%'
+            OR lower(type) LIKE '%bike%'
+            OR lower(type) LIKE '%cycl%'
+          )
+        """
+    elif kind == "walking":
+        type_filter = """
+          AND (
+            lower(type) LIKE '%walk%'
+            OR lower(type) LIKE '%hike%'
+          )
+        """
+    else:
+        return jsonify([])
+
+    with get_conn() as conn:
+        rows = conn.execute(f"""
+            SELECT
+                start_time_local AS day,
+                name,
+                type,
+                distance_m,
+                moving_time_s,
+                suffer_score,
+                tcl
+            FROM strava_activities
+            WHERE start_time_local IS NOT NULL
+              AND date(start_time_local) >= date('now', '-' || ? || ' days')
+              {type_filter}
+            ORDER BY start_time_local ASC
+        """, (days,)).fetchall()
+        
+    items = [dict(r) for r in rows]
+    coach = build_activity_page_coach(kind, items)
+
+    return jsonify({
+        "items": items,
+        "coach": coach,
+    })
+
+
+@app.route("/api/cycling")
+def api_cycling():
+    return api_activity_kind("cycling")
+
+
+@app.route("/api/walking")
+def api_walking():
+    return api_activity_kind("walking")
 
 @app.route("/activities")
 def activities_page():

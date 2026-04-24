@@ -1,450 +1,465 @@
-{% extends "base.html" %}
-{% block title %}Home{% endblock %}
+      {% extends "base.html" %}
+      {% block title %}Home{% endblock %}
 
-{% block body_attrs %}
-data-days="{{ days }}"
-data-user-name="{{ USER_NAME }}"
-data-user-height="{{ USER_HEIGHT }}"
-data-target-weight="90"
-data-target-lean="70"
-data-target-bf="17.5"
-data-weekly-kcal-target="17500"
-{% endblock %}
+      {% block body_attrs %}
+      data-days="{{ days }}"
+      data-user-name="{{ USER_NAME }}"
+      data-user-height="{{ USER_HEIGHT }}"
+      data-target-weight="90"
+      data-target-lean="70"
+      data-target-bf="17.5"
+      data-weekly-kcal-target="17500"
+      {% endblock %}
 
-{% block content %}
+      {% block content %}
 
-<h1>Health Monitor</h1>
+      <h1>Health Monitor</h1>
 
-<div class="status-strip">
-  <div class="status-strip__item">
-    <div class="status-strip__label">Advies</div>
-    <div class="status-strip__value">
-      <span class="badge badge--{{ home_status.advice.state }}">{{ home_status.advice.label }}</span>
-      <strong>{{ home_status.advice.score if home_status.advice.score is not none else "—" }}</strong>
-    </div>
-  </div>
+      <div class="status-strip">
+        <div class="status-strip__item">
+          <div class="status-strip__label">Advies</div>
+          <div class="status-strip__value">
+            <span class="badge badge--{{ home_status.advice.state }}">{{ home_status.advice.label }}</span>
+            <strong>{{ home_status.advice.score if home_status.advice.score is not none else "—" }}</strong>
+          </div>
+        </div>
 
-  <div class="status-strip__item">
-    <div class="status-strip__label">Vorm</div>
-    <div class="status-strip__value">
-      <span class="badge badge--{{ home_status.form.state }}">{{ home_status.form.label }}</span>
-      <strong>{{ home_status.form.score if home_status.form.score is not none else "—" }}</strong>
-    </div>
-  </div>
+        <div class="status-strip__item">
+          <div class="status-strip__label">Vorm</div>
+          <div class="status-strip__value">
+            <span class="badge badge--{{ home_status.form.state }}">{{ home_status.form.label }}</span>
+            <strong>{{ home_status.form.score if home_status.form.score is not none else "—" }}</strong>
+          </div>
+        </div>
 
-  <div class="status-strip__item">
-    <div class="status-strip__label">Fitness</div>
-    <div class="status-strip__value">
-      <span class="badge badge--ok">{{ fitness_label }}</span>
-      <strong>{{ home_status.fitness.score if home_status.fitness.score is not none else "—" }}</strong>
-    </div>
-  </div>
+        <div class="status-strip__item">
+          <div class="status-strip__label">Fitness</div>
+          <div class="status-strip__value">
+            <span class="badge badge--ok">{{ fitness_label }}</span>
+            <strong>{{ home_status.fitness.score if home_status.fitness.score is not none else "—" }}</strong>
+          </div>
+        </div>
 
-  <div class="status-strip__item">
-    <div class="status-strip__label">Vermoeidheid</div>
-    <div class="status-strip__value">
-      <span class="badge badge--bad">{{ fatigue_label }}</span>
-      <strong>{{ home_status.fatigue.score if home_status.fatigue.score is not none else "—" }}</strong>
-    </div>
-  </div>
-</div>
-
-<section class="card coach-card">
-  <div class="coach-header">
-  <h3>Coach advies</h3>
-  <span class="coach-status coach-status--{{ coach_v2.status }}">
-    {{ coach_v2.status.replace("_", " ").title() }}
-  </span>
-</div>
-
-<div class="coach-meta">
-  Zekerheid: {{ coach_v2.confidence }}
-</div>
-
-  <div class="card__body">
-    <div class="coach-main">
-      <p><strong>Top insight</strong><br>{{ coach_v2.top_insight }}</p>
-      <p><strong>Advies vandaag</strong><br>{{ coach_v2.advice }}</p>
-    </div>
-
-    {% if coach_v2.why %}
-    <div class="coach-why">
-      <div class="coach-why__title">Waarom dit advies</div>
-      <ul class="coach-why__list">
-        {% for item in coach_v2.why %}
-          <li>{{ item }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-
-    <p><strong>Hersteltrend</strong></br></p>
-    {% if coach_v2.trend == "worsening" %}
-      verslechterend
-    {% elif coach_v2.trend == "improving" %}
-      verbeterend
-    {% else %}
-      stabiel
-    {% endif %}
-
-    {% if coach_v2.recovery %}
-    <div class="coach-subtitle">Recovery snapshot</div>
-
-    <div class="coach-metrics">
-      <div class="coach-metric-card">
-        <span class="coach-metric-card__label">HRV</span>
-        <strong class="coach-metric-card__value">
-          {{ coach_v2.recovery.hrv_rmssd if coach_v2.recovery.hrv_rmssd is not none else "—" }}
-        </strong>
-        <span class="coach-metric-card__meta">
-          baseline {{ coach_v2.baselines.hrv_baseline if coach_v2.baselines.hrv_baseline is not none else "—" }}
-        </span>
-      </div>
-
-      <div class="coach-metric-card">
-        <span class="coach-metric-card__label">Stress</span>
-        <strong class="coach-metric-card__value">
-          {{ coach_v2.recovery.stress if coach_v2.recovery.stress is not none else "—" }}
-        </strong>
-        <span class="coach-metric-card__meta">
-          baseline {{ coach_v2.baselines.stress_baseline if coach_v2.baselines.stress_baseline is not none else "—" }}
-        </span>
-      </div>
-
-      <div class="coach-metric-card">
-        <span class="coach-metric-card__label">Slaapscore</span>
-        <strong class="coach-metric-card__value">
-          {{ coach_v2.recovery.sleep_score if coach_v2.recovery.sleep_score is not none else "—" }}
-        </strong>
-        <span class="coach-metric-card__meta">
-          baseline {{ coach_v2.baselines.sleep_baseline if coach_v2.baselines.sleep_baseline is not none else "—" }}
-        </span>
-      </div>
-    </div>
-
-    {% if coach_v2.recovery.notes %}
-    <div class="coach-note">
-      <strong>Notitie</strong>
-      <p>{{ coach_v2.recovery.notes }}</p>
-    </div>
-    {% endif %}
-    {% endif %}
-  </div>
-</section>
-
-<section class="card">
-  <div class="card__header">
-    <h3>Trainingsadvies</h3>
-    <span class="badge badge--{{ training_advice.tone }}">{{ training_advice.label }}</span>
-  </div>
-
-  <div class="card__body">
-    <div class="training-advice">
-      <div class="training-advice__gauge">
-        <div class="recovery-gauge recovery-gauge--{{ training_advice.tone }}"
-          style="--value: {{ advice_score or 0 }};">
-          <svg viewBox="0 0 120 120" class="recovery-gauge__svg" aria-hidden="true">
-            <circle class="recovery-gauge__track" cx="60" cy="60" r="46"></circle>
-            <circle class="recovery-gauge__progress" cx="60" cy="60" r="46"></circle>
-          </svg>
-
-          <div class="recovery-gauge__center">
-            <div class="recovery-gauge__score">{{ advice_score if advice_score is not none else "—" }}</div>
-            <div class="recovery-gauge__label">{{ training_advice.label }}</div>
+        <div class="status-strip__item">
+          <div class="status-strip__label">Vermoeidheid</div>
+          <div class="status-strip__value">
+            <span class="badge badge--bad">{{ fatigue_label }}</span>
+            <strong>{{ home_status.fatigue.score if home_status.fatigue.score is not none else "—" }}</strong>
           </div>
         </div>
       </div>
 
-      <div class="training-advice__content">
-        <div class="training-advice__headline">{{ training_advice.summary }}</div>
-        <div class="training-advice__text">{{ training_advice.details }}</div>
-
-        <div class="training-advice__meta">
-          <div class="training-advice__meta-item training-advice__meta-item--{{ training_advice.tone }}">
-            <span>Vorm</span>
-            <strong>{{ strava_status.form if strava_status and strava_status.form is not none else "—" }}</strong>
-          </div>
-
-          <div class="training-advice__meta-item">
-            <span>Fitness</span>
-            <strong>{{ strava_status.fitness if strava_status and strava_status.fitness is not none else "—" }}</strong>
-          </div>
-
-          <div class="training-advice__meta-item">
-            <span>Vermoeidheid</span>
-            <strong>{{ strava_status.fatigue if strava_status and strava_status.fatigue is not none else "—" }}</strong>
-          </div>
-        </div>
+      <section class="card coach-card">
+        <div class="coach-header">
+        <h3>Coach advies</h3>
+        <span class="coach-status coach-status--{{ coach_v2.status }}">
+          {{ coach_v2.status.replace("_", " ").title() }}
+        </span>
       </div>
-    </div>
-  </div>
-</section>
 
-{% if last_ride and last_metrics %}
-<div class="card ride-analysis-card">
-  <div class="ride-analysis__header">
-    <div>
-      <h3>Laatste rit analyse</h3>
-      <div class="ride-analysis__meta">
-        <strong>{{ last_ride.get('name') or last_ride.get('activity_name') or "Laatste rit" }}</strong>
-        <span>· {{ last_ride_kind_label or "Ride" }}</span>
-        <span>· {{ last_ride.get('start_time_local')[:10] if last_ride.get('start_time_local') else "—" }}</span>
+      <div class="coach-meta">
+        Zekerheid: {{ coach_v2.confidence }}
       </div>
-    </div>
-  </div>
 
-  <div class="ride-analysis__grid">
-    <div class="ride-metric">
-      <div class="ride-metric__label">Afstand</div>
-      <div class="ride-metric__current">{{ last_metrics.distance_km }} km</div>
-      {% if prev_metrics and comparison %}
-        <div class="ride-metric__compare">
-          Vergeleken met {{ prev_ride.name if prev_ride else "-" }}
-          {{ prev_metrics.distance_km }} km
-          {% if prev_ride and prev_ride.get('start_time_local') %}
-            <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
+        <div class="card__body">
+          <div class="coach-main">
+            <p><strong>Top insight</strong><br>{{ coach_v2.top_insight }}</p>
+            <p><strong>Advies vandaag</strong><br>{{ coach_v2.advice }}</p>
+          </div>
+
+          {% if coach_v2.why %}
+          <div class="coach-why">
+            <div class="coach-why__title">Waarom dit advies</div>
+            <ul class="coach-why__list">
+              {% for item in coach_v2.why %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
           {% endif %}
-        </div>
-        <div class="ride-metric__delta {{ 'is-up' if comparison.distance_diff > 0 else 'is-down' if comparison.distance_diff < 0 else 'is-flat' }}">
-          {% if comparison.distance_diff > 0 %}+{% endif %}{{ comparison.distance_diff }} km
-        </div>
-      {% endif %}
-    </div>
 
-    <div class="ride-metric">
-      <div class="ride-metric__label">Gem. snelheid</div>
-      <div class="ride-metric__current">{{ last_metrics.speed_kmh }} km/u</div>
-      {% if prev_metrics and comparison %}
-        <div class="ride-metric__compare">
-          Vergeleken met {{ prev_ride.name if prev_ride else "-" }}
-          {{ prev_metrics.speed_kmh }} km/u
-          {% if prev_ride and prev_ride.get('start_time_local') %}
-            <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
+          <p><strong>Hersteltrend</strong></br></p>
+          {% if coach_v2.trend == "worsening" %}
+            verslechterend
+          {% elif coach_v2.trend == "improving" %}
+            verbeterend
+          {% else %}
+            stabiel
           {% endif %}
-        </div>
-        <div class="ride-metric__delta {{ 'is-up' if comparison.speed_diff > 0 else 'is-down' if comparison.speed_diff < 0 else 'is-flat' }}">
-          {% if comparison.speed_diff > 0 %}+{% endif %}{{ comparison.speed_diff }} km/u
-        </div>
-      {% endif %}
-    </div>
 
-    <div class="ride-metric">
-      <div class="ride-metric__label">Suffer score</div>
-      <div class="ride-metric__current">{{ last_metrics.suffer }}</div>
-      {% if prev_metrics and comparison %}
-        <div class="ride-metric__compare">
-          Vergeleken met {{ prev_ride.name if prev_ride else "-" }}
-          {{ prev_metrics.suffer }}
-          {% if prev_ride and prev_ride.get('start_time_local') %}
-            <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
-          {% endif %}
-        </div>
-        <div class="ride-metric__delta {{ 'is-up' if comparison.suffer_diff > 0 else 'is-down' if comparison.suffer_diff < 0 else 'is-flat' }}">
-          {% if comparison.suffer_diff > 0 %}+{% endif %}{{ comparison.suffer_diff }}
-        </div>
-      {% endif %}
-    </div>
-  </div>
+          {% if coach_v2.recovery %}
+          <div class="coach-subtitle">Recovery snapshot</div>
 
-  {% if ride_insight %}
-    <div class="ride-analysis__insight">
-      {{ ride_insight }}
-    </div>
-  {% endif %}
-</div>
-{% endif %}
+          <div class="coach-metrics">
+            <div class="coach-metric-card">
+              <span class="coach-metric-card__label">HRV</span>
+              <strong class="coach-metric-card__value">
+                {{ coach_v2.recovery.hrv_rmssd if coach_v2.recovery.hrv_rmssd is not none else "—" }}
+              </strong>
+              <span class="coach-metric-card__meta">
+                baseline {{ coach_v2.baselines.hrv_baseline if coach_v2.baselines.hrv_baseline is not none else "—" }}
+              </span>
+            </div>
 
-<div class="card">
-  <div class="card__header">
-    <h3>Weekoverzicht</h3>
-    <span class="muted">{{ week_comp.period_label }}</span>
-  </div>
+            <div class="coach-metric-card">
+              <span class="coach-metric-card__label">Stress</span>
+              <strong class="coach-metric-card__value">
+                {{ coach_v2.recovery.stress if coach_v2.recovery.stress is not none else "—" }}
+              </strong>
+              <span class="coach-metric-card__meta">
+                baseline {{ coach_v2.baselines.stress_baseline if coach_v2.baselines.stress_baseline is not none else "—" }}
+              </span>
+            </div>
 
-  <div class="card__body">
-    <div class="week-summary-grid">
-
-      <!-- 🚴 Fietsen -->
-      <div class="metric-tile">
-        <span class="metric-tile__label">Fietsen</span>
-
-        <strong class="metric-tile__value {{ week_comp.ride.count.trend_class }}">
-          {{ week_comp.ride.count.current }}x {{ week_comp.ride.count.trend }}
-        </strong>
-
-      <div class="metric-tile__sub">
-        {{ format_km(week_comp.ride.distance.current) }} km
-        <span class="{{ week_comp.ride.distance.trend_class }}">
-          ({{ week_comp.ride.distance.delta | round(1) }},
-           {{ week_comp.ride.distance.pct | default(0) | round(0) }}%)
-        </span>
-      </div>
-    </div>
-
-      <!-- 🚶 Wandelen -->
-      <div class="metric-tile">
-        <span class="metric-tile__label">Wandelen</span>
-
-        <strong class="metric-tile__value {{ week_comp.walk.count.trend_class }}">
-          {{ week_comp.walk.count.current }}x {{ week_comp.walk.count.trend }}
-        </strong>
-
-        <div class="metric-tile__sub">
-          {{ format_km(week_comp.walk.distance.current) }} km
-          <span class="{{ week_comp.walk.distance.trend_class }}">
-            ({{ week_comp.walk.distance.delta | round(1) }},
-             {{ week_comp.walk.distance.pct | default(0) | round(0) }}%)
-          </span>
-        </div>
-      </div>
-      
-      <!-- 🏋️ Kracht -->
-      <div class="metric-tile">
-        <span class="metric-tile__label">Krachttraining</span>
-
-        <strong class="metric-tile__value {{ week_comp.strength.count.trend_class }}">
-          {{ week_comp.strength.count.current }}x {{ week_comp.strength.count.trend }}
-        </strong>
-
-        <div class="metric-tile__sub">
-          {{ format_duration_short(week_comp.strength.duration.current) }}
-          <span class="{{ week_comp.strength.duration.trend_class }}">
-            ({{ week_comp.strength.duration.delta > 0 and "+" or "" }}
-            {{ (week_comp.strength.duration.delta / 3600) | round(1) }}u)
-          </span>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="card">
-  <div class="card__body">
-    <div class="coach-stack">
-      <div class="coach-message">
-        {{ week_comp.coach }}
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="stack">
-  <section class="card strava-status-card">
-    <div class="card__header">
-      <h3>Strava status</h3>
-      {% if last_strava_sync %}
-        <span class="muted">
-          Sync: {{ last_strava_sync[:16].replace("T", " ") }}
-        </span>
-      {% endif %}
-      <span class="badge badge--{{ strava_status.state if strava_status else 'unknown' }}">
-        {{ strava_status.label if strava_status else "Onbekend" }}
-      </span>
-    </div>
-
-    <div class="card__body">
-      <div class="strava-status-content">
-        <div class="metrics-grid">
-          <div class="metric-box">
-            <div class="metric-box__label">Fitness</div>
-            <div class="metric-box__value">{{ strava_status.fitness if strava_status else "—" }}</div>
-            <div class="metric-box__sub">
-              {% if strava_status and strava_status.fitness_delta is not none %}
-              {% if strava_status.fitness_delta >= 0 %}↑{% else %}↓{% endif %}
-              {{ strava_status.fitness_delta | abs }}
-              {% endif %}
+            <div class="coach-metric-card">
+              <span class="coach-metric-card__label">Slaapscore</span>
+              <strong class="coach-metric-card__value">
+                {{ coach_v2.recovery.sleep_score if coach_v2.recovery.sleep_score is not none else "—" }}
+              </strong>
+              <span class="coach-metric-card__meta">
+                baseline {{ coach_v2.baselines.sleep_baseline if coach_v2.baselines.sleep_baseline is not none else "—" }}
+              </span>
             </div>
           </div>
 
-          <div class="metric-box">
-            <div class="metric-box__label">Vermoeidheid</div>
-            <div class="metric-box__value">{{ strava_status.fatigue if strava_status else "—" }}</div>
-            <div class="metric-box__sub">
-              {% if strava_status and strava_status.fatigue_delta is not none %}
-              {% if strava_status.fatigue_delta >= 0 %}↑{% else %}↓{% endif %}
-              {{ strava_status.fatigue_delta | abs }}
-              {% endif %}
+          {% if coach_v2.recovery.notes %}
+          <div class="coach-note">
+            <strong>Notitie</strong>
+            <p>{{ coach_v2.recovery.notes }}</p>
+          </div>
+          {% endif %}
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <h3>Trainingsadvies</h3>
+          <span class="badge badge--{{ training_advice.tone }}">{{ training_advice.label }}</span>
+        </div>
+
+        <div class="card__body">
+          <div class="training-advice">
+            <div class="training-advice__gauge">
+              <div class="recovery-gauge recovery-gauge--{{ training_advice.tone }}"
+                style="--value: {{ advice_score or 0 }};">
+                <svg viewBox="0 0 120 120" class="recovery-gauge__svg" aria-hidden="true">
+                  <circle class="recovery-gauge__track" cx="60" cy="60" r="46"></circle>
+                  <circle class="recovery-gauge__progress" cx="60" cy="60" r="46"></circle>
+                </svg>
+
+                <div class="recovery-gauge__center">
+                  <div class="recovery-gauge__score">{{ advice_score if advice_score is not none else "—" }}</div>
+                  <div class="recovery-gauge__label">{{ training_advice.label }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="training-advice__content">
+              <div class="training-advice__headline">{{ training_advice.summary }}</div>
+              <div class="training-advice__text">{{ training_advice.details }}</div>
+
+              <div class="training-advice__meta">
+                <div class="training-advice__meta-item training-advice__meta-item--{{ training_advice.tone }}">
+                  <span>Vorm</span>
+                  <strong>{{ strava_status.form if strava_status and strava_status.form is not none else "—" }}</strong>
+                </div>
+
+                <div class="training-advice__meta-item">
+                  <span>Fitness</span>
+                  <strong>{{ strava_status.fitness if strava_status and strava_status.fitness is not none else "—" }}</strong>
+                </div>
+
+                <div class="training-advice__meta-item">
+                  <span>Vermoeidheid</span>
+                  <strong>{{ strava_status.fatigue if strava_status and strava_status.fatigue is not none else "—" }}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {% if last_ride and last_metrics %}
+      <div class="card ride-analysis-card">
+        <div class="ride-analysis__header">
+          <div>
+            <h3>Laatste rit analyse</h3>
+            <div class="ride-analysis__meta">
+              <strong>{{ last_ride.get('name') or last_ride.get('activity_name') or "Laatste rit" }}</strong>
+              <span>· {{ last_ride_kind_label or "Ride" }}</span>
+              <span>· {{ last_ride.get('start_time_local')[:10] if last_ride.get('start_time_local') else "—" }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ride-analysis__grid">
+          <div class="ride-metric">
+            <div class="ride-metric__label">Afstand</div>
+            <div class="ride-metric__current">{{ last_metrics.distance_km }} km</div>
+            {% if prev_metrics and comparison %}
+              <div class="ride-metric__compare">
+                Vergeleken met {{ prev_ride.name if prev_ride else "-" }}
+                {{ prev_metrics.distance_km }} km
+                {% if prev_ride and prev_ride.get('start_time_local') %}
+                  <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
+                {% endif %}
+              </div>
+              <div class="ride-metric__delta {{ 'is-up' if comparison.distance_diff > 0 else 'is-down' if comparison.distance_diff < 0 else 'is-flat' }}">
+                {% if comparison.distance_diff > 0 %}+{% endif %}{{ comparison.distance_diff }} km
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="ride-metric">
+            <div class="ride-metric__label">Gem. snelheid</div>
+            <div class="ride-metric__current">{{ last_metrics.speed_kmh }} km/u</div>
+            {% if prev_metrics and comparison %}
+              <div class="ride-metric__compare">
+                Vergeleken met {{ prev_ride.name if prev_ride else "-" }}
+                {{ prev_metrics.speed_kmh }} km/u
+                {% if prev_ride and prev_ride.get('start_time_local') %}
+                  <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
+                {% endif %}
+              </div>
+              <div class="ride-metric__delta {{ 'is-up' if comparison.speed_diff > 0 else 'is-down' if comparison.speed_diff < 0 else 'is-flat' }}">
+                {% if comparison.speed_diff > 0 %}+{% endif %}{{ comparison.speed_diff }} km/u
+              </div>
+            {% endif %}
+          </div>
+
+          <div class="ride-metric">
+            <div class="ride-metric__label">Suffer score</div>
+            <div class="ride-metric__current">{{ last_metrics.suffer }}</div>
+            {% if prev_metrics and comparison %}
+              <div class="ride-metric__compare">
+                Vergeleken met {{ prev_ride.name if prev_ride else "-" }}
+                {{ prev_metrics.suffer }}
+                {% if prev_ride and prev_ride.get('start_time_local') %}
+                  <span class="ride-metric__compare-date">({{ prev_ride.get('start_time_local')[:10] }})</span>
+                {% endif %}
+              </div>
+              <div class="ride-metric__delta {{ 'is-up' if comparison.suffer_diff > 0 else 'is-down' if comparison.suffer_diff < 0 else 'is-flat' }}">
+                {% if comparison.suffer_diff > 0 %}+{% endif %}{{ comparison.suffer_diff }}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if ride_insight %}
+          <div class="ride-analysis__insight">
+            {{ ride_insight }}
+          </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <div class="card">
+        <div class="card__header">
+          <h3>Weekoverzicht</h3>
+          <span class="muted">{{ week_comp.period_label }}</span>
+        </div>
+
+        <div class="card__body">
+          <div class="week-summary-grid">
+
+            <!-- 🚴 Fietsen -->
+            <div class="metric-tile">
+              <span class="metric-tile__label">Fietsen</span>
+
+              <strong class="metric-tile__value {{ week_comp.ride.count.trend_class }}">
+                {{ week_comp.ride.count.current }}x {{ week_comp.ride.count.trend }}
+              </strong>
+
+            <div class="metric-tile__sub">
+              {{ format_km(week_comp.ride.distance.current) }} km
+              <span class="{{ week_comp.ride.distance.trend_class }}">
+                ({{ week_comp.ride.distance.delta | round(1) }},
+                {{ week_comp.ride.distance.pct | default(0) | round(0) }}%)
+              </span>
             </div>
           </div>
 
-          <div class="metric-box">
-            <div class="metric-box__label">Vorm</div>
-            <div class="metric-box__value">{{ strava_status.form if strava_status else "—" }}</div>
-            <div class="metric-box__sub">
-              {% if strava_status and strava_status.form_delta is not none %}
-              {% if strava_status.form_delta >= 0 %}↑{% else %}↓{% endif %}
-              {{ strava_status.form_delta | abs }}
-              {% endif %}
+            <!-- 🚶 Wandelen -->
+            <div class="metric-tile">
+              <span class="metric-tile__label">Wandelen</span>
+
+              <strong class="metric-tile__value {{ week_comp.walk.count.trend_class }}">
+                {{ week_comp.walk.count.current }}x {{ week_comp.walk.count.trend }}
+              </strong>
+
+              <div class="metric-tile__sub">
+                {{ format_km(week_comp.walk.distance.current) }} km
+                <span class="{{ week_comp.walk.distance.trend_class }}">
+                  ({{ week_comp.walk.distance.delta | round(1) }},
+                  {{ week_comp.walk.distance.pct | default(0) | round(0) }}%)
+                </span>
+              </div>
+            </div>
+            
+            <!-- 🏋️ Kracht -->
+          <div class="metric-tile">
+            <!-- 🏋️ Kracht -->
+            <div class="metric-tile">
+              <span class="metric-tile__label">Krachttraining</span>
+              <strong>
+                {{ week_comp.strength.count.current|int }}x
+                <span class="{{ week_comp.strength.count.trend_class }}">
+                  {{ week_comp.strength.count.trend }}
+                </span>
+              </strong>
+
+              <small>
+                {{ (week_comp.strength.duration.current / 60)|int }} min ·
+                load {{ (week_comp.strength.load.current / 1000)|round(1) }}kg
+                <br>
+                <span class="muted">
+                  {{ week_comp.strength.sets.current|int }} sets ·
+                  {{ week_comp.strength.reps.current|int }} reps
+                </span>
+
+                {% if week_comp.strength.load.delta != 0 %}
+                  <span class="{{ week_comp.strength.load.trend_class }}">
+                    {{ week_comp.strength.load.trend }}
+                    {{ week_comp.strength.load.trend_pct|round(0)|int }}%
+                  </span>
+                {% endif %}
+              </small>
+            </div>
+
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__body">
+          <div class="coach-stack">
+            <div class="coach-message">
+              {{ week_comp.coach }}
+              <br>
+              {{ week_comp.strength_coach }}
             </div>
           </div>
+        </div>
+      </div>
 
-          <div class="metric-box">
-            <div class="metric-box__label">Vandaag load</div>
-            <div class="metric-box__value">{{ strava_status.daily_load if strava_status else "—" }}</div>
-            <div class="metric-box__sub">vandaag</div>
+      <div class="stack">
+        <section class="card strava-status-card">
+          <div class="card__header">
+            <h3>Strava status</h3>
+            {% if last_strava_sync %}
+              <span class="muted">
+                Sync: {{ last_strava_sync[:16].replace("T", " ") }}
+              </span>
+            {% endif %}
+            <span class="badge badge--{{ strava_status.state if strava_status else 'unknown' }}">
+              {{ strava_status.label if strava_status else "Onbekend" }}
+            </span>
           </div>
-        </div>
+
+          <div class="card__body">
+            <div class="strava-status-content">
+              <div class="metrics-grid">
+                <div class="metric-box">
+                  <div class="metric-box__label">Fitness</div>
+                  <div class="metric-box__value">{{ strava_status.fitness if strava_status else "—" }}</div>
+                  <div class="metric-box__sub">
+                    {% if strava_status and strava_status.fitness_delta is not none %}
+                    {% if strava_status.fitness_delta >= 0 %}↑{% else %}↓{% endif %}
+                    {{ strava_status.fitness_delta | abs }}
+                    {% endif %}
+                  </div>
+                </div>
+
+                <div class="metric-box">
+                  <div class="metric-box__label">Vermoeidheid</div>
+                  <div class="metric-box__value">{{ strava_status.fatigue if strava_status else "—" }}</div>
+                  <div class="metric-box__sub">
+                    {% if strava_status and strava_status.fatigue_delta is not none %}
+                    {% if strava_status.fatigue_delta >= 0 %}↑{% else %}↓{% endif %}
+                    {{ strava_status.fatigue_delta | abs }}
+                    {% endif %}
+                  </div>
+                </div>
+
+                <div class="metric-box">
+                  <div class="metric-box__label">Vorm</div>
+                  <div class="metric-box__value">{{ strava_status.form if strava_status else "—" }}</div>
+                  <div class="metric-box__sub">
+                    {% if strava_status and strava_status.form_delta is not none %}
+                    {% if strava_status.form_delta >= 0 %}↑{% else %}↓{% endif %}
+                    {{ strava_status.form_delta | abs }}
+                    {% endif %}
+                  </div>
+                </div>
+
+                <div class="metric-box">
+                  <div class="metric-box__label">Vandaag load</div>
+                  <div class="metric-box__value">{{ strava_status.daily_load if strava_status else "—" }}</div>
+                  <div class="metric-box__sub">vandaag</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card__header">
+            <h3>Hume</h3>
+          </div>
+
+          <div class="card__body">
+            <div class="hume-grid">
+              <div class="metric">
+                <span>Weight</span>
+                <strong>{{ latest_hume.weight_kg if latest_hume and latest_hume.weight_kg is not none else "—" }}{% if
+                  latest_hume and latest_hume.weight_kg is not none %} kg{% endif %}</strong>
+              </div>
+
+              <div class="metric">
+                <span>Body fat</span>
+                <strong>{{ latest_hume.body_fat_pct if latest_hume and latest_hume.body_fat_pct is not none else "—" }}{% if
+                  latest_hume and latest_hume.body_fat_pct is not none %} %{% endif %}</strong>
+              </div>
+
+              <div class="metric">
+                <span>Lean mass</span>
+                <strong>{{ latest_hume.lean_mass_kg if latest_hume and latest_hume.lean_mass_kg is not none else "—" }}{% if
+                  latest_hume and latest_hume.lean_mass_kg is not none %} kg{% endif %}</strong>
+              </div>
+
+              <div class="metric">
+                <span>LBMI</span>
+                <strong>{{ lbmi_display if lbmi_display is not none else "—" }}</strong>
+              </div>
+
+              <div class="metric">
+                <span>Δ weight</span>
+                <strong>{{ delta_weight if delta_weight is not none else "—" }}</strong>
+              </div>
+
+              <div class="metric">
+                <span>Δ body fat</span>
+                <strong>{{ delta_bf if delta_bf is not none else "—" }}</strong>
+              </div>
+
+              <div class="metric">
+                <span>Δ lean</span>
+                <strong>{{ delta_lean if delta_lean is not none else "—" }}</strong>
+              </div>
+
+              <div class="metric">
+                <span>Δ LBMI</span>
+                <strong>{{ delta_lbmi_display if delta_lbmi_display is not none else "—" }}</strong>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
-    </div>
-  </section>
 
-  <section class="card">
-    <div class="card__header">
-      <h3>Hume</h3>
-    </div>
+      {% endblock %}
 
-    <div class="card__body">
-      <div class="hume-grid">
-        <div class="metric">
-          <span>Weight</span>
-          <strong>{{ latest_hume.weight_kg if latest_hume and latest_hume.weight_kg is not none else "—" }}{% if
-            latest_hume and latest_hume.weight_kg is not none %} kg{% endif %}</strong>
-        </div>
-
-        <div class="metric">
-          <span>Body fat</span>
-          <strong>{{ latest_hume.body_fat_pct if latest_hume and latest_hume.body_fat_pct is not none else "—" }}{% if
-            latest_hume and latest_hume.body_fat_pct is not none %} %{% endif %}</strong>
-        </div>
-
-        <div class="metric">
-          <span>Lean mass</span>
-          <strong>{{ latest_hume.lean_mass_kg if latest_hume and latest_hume.lean_mass_kg is not none else "—" }}{% if
-            latest_hume and latest_hume.lean_mass_kg is not none %} kg{% endif %}</strong>
-        </div>
-
-        <div class="metric">
-          <span>LBMI</span>
-          <strong>{{ lbmi_display if lbmi_display is not none else "—" }}</strong>
-        </div>
-
-        <div class="metric">
-          <span>Δ weight</span>
-          <strong>{{ delta_weight if delta_weight is not none else "—" }}</strong>
-        </div>
-
-        <div class="metric">
-          <span>Δ body fat</span>
-          <strong>{{ delta_bf if delta_bf is not none else "—" }}</strong>
-        </div>
-
-        <div class="metric">
-          <span>Δ lean</span>
-          <strong>{{ delta_lean if delta_lean is not none else "—" }}</strong>
-        </div>
-
-        <div class="metric">
-          <span>Δ LBMI</span>
-          <strong>{{ delta_lbmi_display if delta_lbmi_display is not none else "—" }}</strong>
-        </div>
-      </div>
-    </div>
-  </section>
-</div>
-
-{% endblock %}
-
-{% block scripts %}
-<script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
-<script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
-{% endblock %}
+      {% block scripts %}
+      <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+      <script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
+      <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+      {% endblock %}
